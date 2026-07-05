@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model UserAccount {
+  id           String   @id @default(cuid())
+  username     String   @unique @db.VarChar(8)
+  passwordHash String   @db.VarChar(200)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Message {
+  id        Int      @id @default(autoincrement())
+  content   String
+  createdAt DateTime @default(now())
+}
+
+model FeeType {
+  id             String   @id @default(cuid())
+  feeCode        String   @unique @db.VarChar(8)
+  feeName        String   @db.VarChar(32)
+  businessDomain String   @db.VarChar(16)
+  quoteTypes     String[]
+  note           String?  @db.VarChar(256)
+  createdBy      String   @db.VarChar(32)
+  createdAt      DateTime @default(now())
+  updatedBy      String   @db.VarChar(32)
+  updatedAt      DateTime @updatedAt
+}
+
+model FeeTypeOperationLog {
+  id            String   @id @default(cuid())
+  feeTypeId     String?  @db.VarChar(32)
+  feeCode       String   @db.VarChar(8)
+  feeName       String   @db.VarChar(32)
+  operationType String   @db.VarChar(16)
+  operatorName  String   @db.VarChar(32)
+  summary       String   @db.VarChar(256)
+  createdAt     DateTime @default(now())
+}
+
+model UniversalImportRule {
+  id           String   @id @default(cuid())
+  fingerprint  String   @unique @db.VarChar(512)
+  ruleName     String   @db.VarChar(64)
+  fileType     String   @db.VarChar(16)
+  version      Int      @default(1)
+  status       String   @db.VarChar(16)
+  mapping      Json
+  ruleDsl      Json?
+  sampleMeta   Json?
+  createdBy    String   @db.VarChar(32)
+  updatedBy    String   @db.VarChar(32)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  batches      UniversalImportBatch[]
+}
+
+model UniversalImportBatch {
+  id               String                    @id @default(cuid())
+  batchName        String                    @db.VarChar(64)
+  originalFileName String                    @db.VarChar(128)
+  sourceSheetName  String                    @db.VarChar(64)
+  fileType         String                    @db.VarChar(16)
+  ruleId           String?
+  ruleVersion      Int?
+  totalRows        Int
+  successRows      Int
+  failedRows       Int
+  status           String                    @db.VarChar(24)
+  parseSummary     Json?
+  createdBy        String                    @db.VarChar(32)
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  rule             UniversalImportRule?      @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  shipments        UniversalImportShipment[]
+
+  @@index([createdAt])
+  @@index([ruleId])
+}
+
+model UniversalImportShipment {
+  id              String                    @id @default(cuid())
+  batchId         String
+  batch           UniversalImportBatch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  externalCode    String                    @db.VarChar(64)
+  receiverStore   String?                   @db.VarChar(128)
+  receiverName    String?                   @db.VarChar(64)
+  receiverPhone   String?                   @db.VarChar(32)
+  receiverAddress String?                   @db.VarChar(256)
+  note            String?                   @db.VarChar(256)
+  sourceRowCount  Int
+  raw             Json
+  createdAt       DateTime                  @default(now())
+  receiverGroups  UniversalImportShipmentReceiverGroup[]
+  items           UniversalImportShipmentItem[]
+
+  @@index([batchId])
+  @@index([externalCode])
+  @@index([receiverName])
+}
+
+model UniversalImportShipmentReceiverGroup {
+  id              String                    @id @default(cuid())
+  shipmentId      String
+  shipment        UniversalImportShipment   @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  receiverStore   String?                   @db.VarChar(128)
+  receiverName    String?                   @db.VarChar(64)
+  receiverPhone   String?                   @db.VarChar(32)
+  receiverAddress String?                   @db.VarChar(256)
+  note            String?                   @db.VarChar(256)
+  sourceRowCount  Int
+  raw             Json
+  createdAt       DateTime                  @default(now())
+  items           UniversalImportShipmentItem[]
+
+  @@index([shipmentId])
+  @@index([receiverName])
+}
+
+model UniversalImportShipmentItem {
+  id              String                            @id @default(cuid())
+  shipmentId      String
+  shipment        UniversalImportShipment           @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  receiverGroupId String?
+  receiverGroup   UniversalImportShipmentReceiverGroup? @relation(fields: [receiverGroupId], references: [id], onDelete: SetNull)
+  sourceRowIndex  Int
+  skuCode         String                            @db.VarChar(64)
+  skuName         String                            @db.VarChar(128)
+  skuQuantity     Float
+  skuSpec         String?                           @db.VarChar(128)
+  raw             Json?
+  createdAt       DateTime                          @default(now())
+
+  @@index([shipmentId])
+  @@index([receiverGroupId])
+}
