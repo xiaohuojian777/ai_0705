@@ -2646,7 +2646,6 @@ export function UniversalImportClient({
               <>
                 <section className="workspace-card">
                   <div className="workspace-header">
-                    <div>
                     <div className="import-stat-grid">
                       <article className="overview-card accent">
                         <p>预览行数</p>
