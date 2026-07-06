@@ -459,9 +459,19 @@ export async function POST(request: Request) {
 
     const shipmentMap = new Map<string, ShipmentDraft>();
 
+    // 外部编码为空的行，每行生成独立运单（独立 key）
+    let emptyCodeCounter = 0;
+    function nextEmptyCodeKey(): string {
+      emptyCodeCounter += 1;
+      return `__empty__${emptyCodeCounter}`;
+    }
+
     rows.forEach((row) => {
-      const externalCode = row.externalCode.trim();
-      const current = shipmentMap.get(externalCode);
+      const rawExternalCode = row.externalCode.trim();
+      // 空外部编码 → 生成唯一 key；非空 → 按外部编码聚合
+      const mapKey = rawExternalCode || nextEmptyCodeKey();
+
+      const current = shipmentMap.get(mapKey);
 
       if (current) {
         current.rows.push(row);
@@ -484,8 +494,9 @@ export async function POST(request: Request) {
         return;
       }
 
-      shipmentMap.set(externalCode, {
-        externalCode,
+      shipmentMap.set(mapKey, {
+        // DB 中 externalCode 仍存储真实值（空即空字符串）
+        externalCode: rawExternalCode,
         receiverStore: row.receiverStore.trim() || null,
         receiverName: row.receiverName.trim() || null,
         receiverPhone: row.receiverPhone.trim() || null,

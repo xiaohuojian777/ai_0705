@@ -75,6 +75,17 @@ export async function POST(request: Request) {
       ruleDsl = createDefaultRuleDsl(mapping, fileType);
     }
 
+    // 将检测到的表头行号同步到规则中
+    if (document.headerRowIndex > 0) {
+      const hmTransform = ruleDsl.transforms?.find(
+        (t) => t.type === "header_mapping",
+      );
+      if (hmTransform?.config) {
+        hmTransform.config.headerRowIndex = document.headerRowIndex;
+        hmTransform.config.dataStartRowIndex = document.headerRowIndex + 1;
+      }
+    }
+
     const result = await executeUniversalImportRule({
       fileBuffer,
       fileType,

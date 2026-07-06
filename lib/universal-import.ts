@@ -2,32 +2,36 @@ export const UNIVERSAL_IMPORT_FIELDS = [
   {
     key: "externalCode",
     label: "外部编码",
-    required: true,
+    required: false,
     aliases: ["外部编码", "订单号", "配送单号", "配送汇总单号", "单据编号", "单号", "externalcode", "code"],
   },
   {
     key: "receiverStore",
     label: "收货门店",
     required: false,
-    aliases: ["收货门店", "门店", "门店名称", "收货机构", "store", "shop"],
+    aliases: ["收货门店", "门店", "门店名称", "收货机构", "仓库名称", "调入门店", "store", "shop", "仓库"],
+    labelOptions: ["收货门店", "收货机构", "仓库名称", "调入门店"],
   },
   {
     key: "receiverName",
     label: "收件人姓名",
     required: false,
     aliases: ["收件人姓名", "收货人姓名", "收件人", "收货人", "receiver", "recipient"],
+    labelOptions: ["收件人姓名", "收件人"],
   },
   {
     key: "receiverPhone",
     label: "收件人电话",
     required: false,
     aliases: ["收件人电话", "收货人电话", "收件人手机号", "收货人手机号", "联系电话", "手机号", "手机", "电话", "receiverphone", "recipientphone"],
+    labelOptions: ["收件人电话", "收件人手机号", "联系电话"],
   },
   {
     key: "receiverAddress",
     label: "收件人地址",
     required: false,
     aliases: ["收件人地址", "收货人地址", "收货地址", "地址", "receiveraddress", "recipientaddress"],
+    labelOptions: ["收件人地址", "收货地址"],
   },
   {
     key: "skuCode",
@@ -60,6 +64,23 @@ export const UNIVERSAL_IMPORT_FIELDS = [
     aliases: ["备注", "说明", "附加说明", "note", "remark"],
   },
 ] as const;
+
+/** 返回指定字段的预设标签选项，若未定义则返回空数组 */
+export function getFieldLabelOptions(fieldKey: UniversalImportField): string[] {
+  const field = UNIVERSAL_IMPORT_FIELDS.find((f) => f.key === fieldKey);
+  return (field as { labelOptions?: readonly string[] } | undefined)?.labelOptions?.slice() ?? [];
+}
+
+/** 根据 ruleDsl 中存储的 fieldLabels 获取字段在 UI 中应展示的自定义标签 */
+export function getFieldDisplayLabel(
+  fieldKey: UniversalImportField,
+  fieldLabels?: Partial<Record<UniversalImportField, string>> | null,
+): string {
+  const override = fieldLabels?.[fieldKey]?.trim();
+  if (override) return override;
+  const field = UNIVERSAL_IMPORT_FIELDS.find((f) => f.key === fieldKey);
+  return field?.label ?? fieldKey;
+}
 
 export type UniversalImportField = (typeof UNIVERSAL_IMPORT_FIELDS)[number]["key"];
 
@@ -234,6 +255,15 @@ function isPositiveNumber(value: string) {
   return Number.parseFloat(normalized) > 0;
 }
 
+function isPositiveInteger(value: string) {
+  const normalized = normalizeNumericImportValue(value);
+  if (!/^\d+$/.test(normalized)) {
+    return false;
+  }
+
+  return Number.parseInt(normalized, 10) > 0;
+}
+
 function normalizeExternalCode(value: string) {
   return value.trim().toLowerCase();
 }
@@ -286,13 +316,7 @@ export function validateImportRows(
     const rowNumber = index + 1;
     const externalCode = row.externalCode.trim();
 
-    if (!externalCode) {
-      issues.push({
-        rowIndex: rowNumber,
-        field: "externalCode",
-        message: "必填项缺失",
-      });
-    } else {
+    if (externalCode) {
       const normalized = normalizeExternalCode(externalCode);
       const existing = existingLookup.get(normalized);
 
@@ -333,8 +357,8 @@ export function validateImportRows(
 
     if (!row.skuQuantity.trim()) {
       issues.push({ rowIndex: rowNumber, field: "skuQuantity", message: "必填项缺失" });
-    } else if (!isPositiveNumber(row.skuQuantity.trim())) {
-      issues.push({ rowIndex: rowNumber, field: "skuQuantity", message: "必须为正数" });
+    } else if (!isPositiveInteger(row.skuQuantity.trim())) {
+      issues.push({ rowIndex: rowNumber, field: "skuQuantity", message: "必须为正整数" });
     }
 
   });

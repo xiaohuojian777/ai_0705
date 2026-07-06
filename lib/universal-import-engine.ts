@@ -57,6 +57,7 @@ export type ParsedDocument = {
   fileType: SupportedImportFileType;
   sheetName: string;
   headers: string[];
+  headerRowIndex: number;
   rawRows: string[][];
   textContent: string;
   sections: Array<{
@@ -76,10 +77,23 @@ export type RuleTransformType =
   | "card_split"
   | "text_record_split";
 
+export type PresetReceiver = {
+  id: string;
+  label?: string;
+  receiverStore: string;
+  receiverName: string;
+  receiverPhone: string;
+  receiverAddress: string;
+};
+
 export type UniversalImportRuleDsl = {
   fileType: SupportedImportFileType;
   mode: "mapping" | "text" | "structured";
   defaults?: Partial<Record<UniversalImportField, string>>;
+  /** 字段自定义标签，key 为 UniversalImportField，value 为自定义显示名 */
+  fieldLabels?: Partial<Record<UniversalImportField, string>>;
+  /** 预设收货信息列表，导入时可快速选取 */
+  presetReceivers?: PresetReceiver[];
   transforms: Array<{
     type: RuleTransformType;
     enabled: boolean;
@@ -856,6 +870,37 @@ async function loadPdfParseModule() {
   };
 }
 
+function detectHeaderRowIndex(rows: unknown[][]): number {
+  const allAliases = UNIVERSAL_IMPORT_FIELDS.flatMap((f) =>
+    f.aliases.map((a) => a.toLowerCase()),
+  );
+  const uniqueAliases = [...new Set(allAliases)];
+
+  let bestIndex = 0;
+  let bestScore = 0;
+  const searchLimit = Math.min(rows.length, 15);
+
+  for (let i = 0; i < searchLimit; i++) {
+    const row = rows[i];
+    if (!row || row.length === 0) continue;
+    const joined = row
+      .map((cell) => String(cell ?? "").toLowerCase())
+      .join(" ");
+    let score = 0;
+    for (const alias of uniqueAliases) {
+      if (joined.includes(alias)) score += 1;
+    }
+    // Bonus for longer rows (more columns = more likely to be a header)
+    score += row.filter((cell) => String(cell ?? "").trim().length > 0).length * 0.5;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  }
+
+  return bestIndex;
+}
+
 async function parseExcelDocument(fileBuffer: Buffer, originalFileName: string): Promise<ParsedDocument> {
   const workbook = suppressImageErrors(() => XLSX.read(fileBuffer, { type: "buffer" }));
   const sections: ParsedDocument["sections"] = [];
@@ -881,13 +926,15 @@ async function parseExcelDocument(fileBuffer: Buffer, originalFileName: string):
   });
 
   const firstSection = sections[0];
-  const headers = firstSection?.rows[asNumber(undefined, 0)] ?? [];
+  const headerRowIndex = firstSection ? detectHeaderRowIndex(firstSection.rows) : 0;
+  const headers = firstSection?.rows[headerRowIndex] ?? [];
 
   return {
     fileType: "excel",
     sheetName: workbook.SheetNames[0] ?? originalFileName ?? "Sheet1",
     headers,
-    rawRows: firstSection?.rows.slice(1) ?? [],
+    headerRowIndex,
+    rawRows: firstSection?.rows.slice(headerRowIndex + 1) ?? [],
     textContent: sections.map((section) => section.text).join("\n\n"),
     sections,
   };
@@ -902,6 +949,7 @@ async function parseWordDocument(fileBuffer: Buffer, originalFileName: string): 
     fileType: "word",
     sheetName: originalFileName || "Word Document",
     headers: rows[0] ?? [],
+    headerRowIndex: 0,
     rawRows: rows.slice(1),
     textContent: text,
     sections: [
@@ -951,6 +999,7 @@ async function parsePdfDocument(fileBuffer: Buffer, originalFileName: string): P
     fileType: "pdf",
     sheetName: originalFileName || "PDF Document",
     headers: [],
+    headerRowIndex: 0,
     rawRows: [],
     textContent: text,
     sections: [

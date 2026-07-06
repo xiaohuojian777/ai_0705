@@ -5,6 +5,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   countAggregatedShipments,
+  getFieldDisplayLabel,
+  getFieldLabelOptions,
   UNIVERSAL_IMPORT_FIELDS,
   UNIVERSAL_IMPORT_FIELD_LABELS,
   formatIssueLabel,
@@ -16,6 +18,7 @@ import {
   validateImportRows,
 } from "@/lib/universal-import";
 import type {
+  PresetReceiver,
   RuleTransformType,
   SupportedImportFileType,
   UniversalImportRuleDsl,
@@ -358,30 +361,6 @@ function createRowId() {
   return globalThis.crypto.randomUUID();
 }
 
-function generateExternalCode(prefix: string, index: number) {
-  const pad = String(index).padStart(5, "0");
-  return `${prefix}-${pad}`;
-}
-
-function autoGenerateExternalCodes(rows: UniversalImportRow[]): UniversalImportRow[] {
-  const now = new Date();
-  const dateStr = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    String(now.getDate()).padStart(2, "0"),
-  ].join("");
-  const prefix = `AUTO-${dateStr}`;
-
-  let counter = 0;
-  return rows.map((row) => {
-    if (row.externalCode.trim()) {
-      return row;
-    }
-    counter += 1;
-    return { ...row, externalCode: generateExternalCode(prefix, counter) };
-  });
-}
-
 
 function createEmptyDraftRow(rowIndex: number): DraftRow {
   return {
@@ -635,11 +614,24 @@ function formatColumnOption(option: ColumnOption) {
   return `${option.index + 1}. ${header}${samples}`;
 }
 
+function createEmptyPreset(): PresetReceiver {
+  return {
+    id: crypto.randomUUID(),
+    label: "",
+    receiverStore: "",
+    receiverName: "",
+    receiverPhone: "",
+    receiverAddress: "",
+  };
+}
+
 function buildDefaultRuleDsl(mapping: UniversalImportMapping, fileType: SupportedImportFileType): UniversalImportRuleDsl {
   return {
     fileType,
     mode: fileType === "excel" ? "structured" : "text",
     defaults: {},
+    fieldLabels: {},
+    presetReceivers: [],
     mapping,
     transforms: [
       {
@@ -1184,12 +1176,22 @@ export function UniversalImportClient({
     total: 0,
   });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyDeleting, setHistoryDeleting] = useState(false);
   const [historyData, setHistoryData] = useState<ShipmentHistoryResponse>({});
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([]);
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<DeleteConfirmTarget | null>(null);
+  const [presetEditorOpen, setPresetEditorOpen] = useState(false);
+  const [presetEditorData, setPresetEditorData] = useState<PresetReceiver>(createEmptyPreset());
+  const [presetEditorMode, setPresetEditorMode] = useState<"add" | "edit">("add");
+  const [presetEditingIndex, setPresetEditingIndex] = useState<number | null>(null);
+  const [newRuleDialogOpen, setNewRuleDialogOpen] = useState(false);
+  const [newRuleForm, setNewRuleForm] = useState({ receiverStore: "", receiverName: "", receiverPhone: "", receiverAddress: "" });
+  const [editRuleDialogOpen, setEditRuleDialogOpen] = useState(false);
+  const [editRuleForm, setEditRuleForm] = useState({ ruleName: "", receiverStore: "", receiverName: "", receiverPhone: "", receiverAddress: "" });
+  const [editingRuleId, setEditingRuleId] = useState("");
   const [historyFilters, setHistoryFilters] = useState<HistoryFilters>(DEFAULT_HISTORY_FILTERS);
   const [templateInfo, setTemplateInfo] = useState("");
   const [lastSavedAt, setLastSavedAt] = useState("");
@@ -1283,7 +1285,13 @@ export function UniversalImportClient({
     currentHistoryIds.length > 0 && currentHistoryIds.every((id) => selectedHistoryIdSet.has(id));
   const selectedRuleIdSet = useMemo(() => new Set(selectedRuleIds), [selectedRuleIds]);
   const allRulesSelected = ruleList.length > 0 && ruleList.every((rule) => selectedRuleIdSet.has(rule.id));
-  const hasBlockingErrors = validation.issues.length > 0;
+  const selectedErrorCount = useMemo(() => {
+    if (selectedIds.length === 0) return null;
+    return selectedIds.filter((id) => rowErrorsById.has(id)).length;
+  }, [selectedIds, rowErrorsById]);
+  const hasBlockingErrors = selectedIds.length > 0
+    ? (selectedErrorCount ?? 0) > 0
+    : validation.issues.length > 0;
   const hasSameBatchDuplicateExternalCodes = sameBatchDuplicateReport.summaries.length > 0;
   const allRowsSelected = draftRows.length > 0 && selectedIds.length === draftRows.length;
   const selectedCount = selectedIds.length;
@@ -1374,6 +1382,134 @@ export function UniversalImportClient({
     setRuleDsl((current) => updateRuleDefaultValue(current, field, value));
     setRuleStatus(value.trim() ? "默认值已更新，试解析时会补齐空字段。" : "默认值已清空。");
   }
+
+  function handleFieldLabelChange(field: UniversalImportField, value: string) {
+    setRuleDsl((current) => {
+      const nextFieldLabels = { ...current.fieldLabels } as Record<UniversalImportField, string>;
+      if (value) {
+        nextFieldLabels[field] = value;
+      } else {
+        delete nextFieldLabels[field];
+      }
+      return {
+        ...current,
+        fieldLabels: nextFieldLabels,
+      };
+    });
+    setRuleStatus(value ? `"${field}" 标签已更新为 "${value}"。` : `"${field}" 标签已恢复默认。`);
+  }
+
+  // ---- 新建规则弹框 ----
+  function openNewRuleDialog() {
+    setNewRuleForm({ receiverStore: "", receiverName: "", receiverPhone: "", receiverAddress: "" });
+    setNewRuleDialogOpen(true);
+  }
+
+  function closeNewRuleDialog() {
+    setNewRuleDialogOpen(false);
+  }
+
+  async function confirmNewRule() {
+    const { receiverStore, receiverName, receiverPhone, receiverAddress } = newRuleForm;
+    const trimmed = {
+      receiverStore: receiverStore.trim(),
+      receiverName: receiverName.trim(),
+      receiverPhone: receiverPhone.trim(),
+      receiverAddress: receiverAddress.trim(),
+    };
+
+    closeNewRuleDialog();
+
+    // 如果填写了收货信息，写入预设列表
+    if (trimmed.receiverStore || trimmed.receiverName) {
+      const preset: PresetReceiver = {
+        id: crypto.randomUUID(),
+        label: trimmed.receiverStore || trimmed.receiverName || "默认收货方",
+        ...trimmed,
+      };
+      setRuleDsl((current) => ({
+        ...current,
+        presetReceivers: [...(current.presetReceivers ?? []), preset],
+      }));
+      setRuleStatus(`已添加预设收货信息，正在保存规则...`);
+    } else {
+      setRuleStatus(`正在保存空白规则...`);
+    }
+
+    try {
+      await saveRule("POST");
+    } catch (error) {
+      setRuleStatus(error instanceof Error ? error.message : "保存规则失败，请稍后重试。");
+    }
+  }
+  // ---- 新建规则弹框 END ----
+
+  // ---- 预设收货信息 ----
+  const presetReceivers = ruleDsl.presetReceivers ?? [];
+
+  function openPresetEditor(mode: "add" | "edit", index?: number) {
+    if (mode === "edit" && index !== undefined) {
+      const preset = presetReceivers[index];
+      if (preset) {
+        setPresetEditorData({ ...preset });
+        setPresetEditingIndex(index);
+      }
+    } else {
+      setPresetEditorData(createEmptyPreset());
+      setPresetEditingIndex(null);
+    }
+    setPresetEditorMode(mode);
+    setPresetEditorOpen(true);
+  }
+
+  function closePresetEditor() {
+    setPresetEditorOpen(false);
+    setPresetEditorData(createEmptyPreset());
+    setPresetEditingIndex(null);
+  }
+
+  function savePresetReceiver() {
+    const { receiverStore, receiverName, receiverPhone, receiverAddress } = presetEditorData;
+    if (!receiverStore.trim() && !receiverName.trim()) {
+      setRuleStatus("请至少填写收货门店或收件人姓名。");
+      return;
+    }
+    const saved: PresetReceiver = {
+      ...presetEditorData,
+      label: presetEditorData.label?.trim() || receiverStore.trim() || receiverName.trim() || "未命名",
+      receiverStore: receiverStore.trim(),
+      receiverName: receiverName.trim(),
+      receiverPhone: receiverPhone.trim(),
+      receiverAddress: receiverAddress.trim(),
+    };
+
+    setRuleDsl((current) => {
+      const currentList = current.presetReceivers ?? [];
+      let nextList: PresetReceiver[];
+      if (presetEditorMode === "edit" && presetEditingIndex !== null) {
+        nextList = [...currentList];
+        nextList[presetEditingIndex] = saved;
+      } else {
+        nextList = [...currentList, saved];
+      }
+      return { ...current, presetReceivers: nextList };
+    });
+
+    closePresetEditor();
+    setRuleStatus(
+      presetEditorMode === "edit" ? `预设 "${saved.label}" 已更新。` : `已添加预设收货信息 "${saved.label}"。`,
+    );
+  }
+
+  function deletePresetReceiver(index: number) {
+    const preset = presetReceivers[index];
+    setRuleDsl((current) => ({
+      ...current,
+      presetReceivers: (current.presetReceivers ?? []).filter((_, i) => i !== index),
+    }));
+    setRuleStatus(preset ? `已删除预设 "${preset.label ?? preset.receiverStore}"。` : "已删除预设。");
+  }
+  // ---- 预设收货信息 END ----
 
   function handleTransformConfigDraftChange(transformType: RuleTransformType, value: string) {
     setTransformConfigDrafts((current) => ({
@@ -1690,8 +1826,8 @@ export function UniversalImportClient({
     });
     setStatus(
       selectedRuleId
-        ? "文件已上传，请点击“试解析选中规则”。"
-        : "文件已上传，系统将使用默认规则解析，请点击“试解析选中规则”。",
+        ? "文件已上传，请点击「试解析选中规则」。"
+        : "文件已上传，系统将使用默认规则解析，请点击「试解析选中规则」。",
     );
     if (incompatibleRuleSelected) {
       setSelectedRuleId("");
@@ -1757,7 +1893,7 @@ export function UniversalImportClient({
     setAiProviderLabel("");
     setAiModelLabel("");
     setTemplateInfo("文件类型已变更，请重新手动选择解析规则。");
-    setStatus("文件类型已变更，请重新在“选择解析规则”中选择已保存规则。");
+    setStatus("文件类型已变更，请重新在「选择解析规则」中选择已保存规则。");
   }
 
   function applyRuleToState(
@@ -1769,8 +1905,7 @@ export function UniversalImportClient({
     nextHeaders: string[],
     nextColumnOptions = toColumnOptions(nextHeaders),
   ) {
-    const filledRows = autoGenerateExternalCodes(rows);
-    setDraftRows(toDraftRows(filledRows));
+    setDraftRows(toDraftRows(rows));
     setPreviewRenderLimit(PREVIEW_INITIAL_RENDER_COUNT);
     setMapping(nextMapping);
     setRuleDsl(nextRuleDsl);
@@ -1983,8 +2118,8 @@ export function UniversalImportClient({
       const template = await saveRule("POST");
       setRuleStatus(
         headers.length > 0
-          ? `规则“${template.ruleName}”已保存。`
-          : `空白规则“${template.ruleName}”已创建，可后续上传样例文件、生成 AI 建议或编辑规则配置。`,
+          ? `规则"${template.ruleName}"已保存。`
+          : `空白规则"${template.ruleName}"已创建，可后续上传样例文件、生成 AI 建议或编辑规则配置。`,
       );
     } catch (error) {
       setRuleStatus(error instanceof Error ? error.message : "保存规则失败，请稍后重试。");
@@ -1998,8 +2133,8 @@ export function UniversalImportClient({
     }
     try {
       const template = await saveRule("POST");
-      setRuleStatus(`AI 建议已确认，并保存为规则“${template.ruleName}”。`);
-      setStatus(`AI 建议已确认，并保存为规则“${template.ruleName}”。`);
+      setRuleStatus(`AI 建议已确认，并保存为规则"${template.ruleName}"。`);
+      setStatus(`AI 建议已确认，并保存为规则"${template.ruleName}"。`);
     } catch (error) {
       setRuleStatus(error instanceof Error ? error.message : "确认 AI 建议失败，请稍后重试。");
     }
@@ -2012,7 +2147,7 @@ export function UniversalImportClient({
     }
     try {
       const template = await saveRule("PUT", selectedRuleId);
-      setRuleStatus(`规则“${template.ruleName}”已更新到版本 ${template.version}。`);
+      setRuleStatus(`规则"${template.ruleName}"已更新到版本 ${template.version}。`);
     } catch (error) {
       setRuleStatus(error instanceof Error ? error.message : "更新规则失败，请稍后重试。");
     }
@@ -2037,6 +2172,7 @@ export function UniversalImportClient({
     setFileType(rule.fileType as SupportedImportFileType);
     setDraftRows([]);
     setSelectedIds([]);
+    setSelectedPresetId("");
     setFingerprint("");
     setRuleTestSummary("");
     setTemplateInfo(`当前使用规则：${rule.ruleName}`);
@@ -2044,9 +2180,69 @@ export function UniversalImportClient({
   }
 
   function handleEditRule(rule: RuleRecord) {
-    handleApplyRule(rule);
-    setRuleStatus(`已进入规则“${rule.ruleName}”编辑状态，可直接修改字段映射和规则配置后保存。`);
-    setTemplateInfo(`当前正在编辑规则：${rule.ruleName}`);
+    const presets = (rule.ruleDsl as UniversalImportRuleDsl | null)?.presetReceivers ?? [];
+    const firstPreset = presets[0];
+    setEditingRuleId(rule.id);
+    setEditRuleForm({
+      ruleName: rule.ruleName,
+      receiverStore: firstPreset?.receiverStore ?? "",
+      receiverName: firstPreset?.receiverName ?? "",
+      receiverPhone: firstPreset?.receiverPhone ?? "",
+      receiverAddress: firstPreset?.receiverAddress ?? "",
+    });
+    setEditRuleDialogOpen(true);
+  }
+
+  function closeEditRuleDialog() {
+    setEditRuleDialogOpen(false);
+    setEditingRuleId("");
+  }
+
+  async function confirmEditRule() {
+    const { ruleName, receiverStore, receiverName, receiverPhone, receiverAddress } = editRuleForm;
+    const trimmed = {
+      ruleName: ruleName.trim(),
+      receiverStore: receiverStore.trim(),
+      receiverName: receiverName.trim(),
+      receiverPhone: receiverPhone.trim(),
+      receiverAddress: receiverAddress.trim(),
+    };
+
+    closeEditRuleDialog();
+
+    try {
+      const payload: Record<string, unknown> = {
+        ruleName: trimmed.ruleName || "导入规则",
+      };
+
+      if (trimmed.receiverStore || trimmed.receiverName) {
+        const preset: PresetReceiver = {
+          id: crypto.randomUUID(),
+          label: trimmed.receiverStore || trimmed.receiverName || "默认收货方",
+          receiverStore: trimmed.receiverStore,
+          receiverName: trimmed.receiverName,
+          receiverPhone: trimmed.receiverPhone,
+          receiverAddress: trimmed.receiverAddress,
+        };
+        payload.ruleDsl = {
+          presetReceivers: [preset],
+        };
+      }
+
+      const response = await fetch(`/api/universal-import/templates/${editingRuleId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await response.json()) as { template?: RuleRecord; error?: string };
+      if (!response.ok || !data.template) {
+        throw new Error(data.error ?? "更新规则失败，请稍后重试。");
+      }
+      setRuleStatus(`规则「${data.template.ruleName}」已更新。`);
+      await loadRules();
+    } catch (error) {
+      setRuleStatus(error instanceof Error ? error.message : "更新规则失败，请稍后重试。");
+    }
   }
 
   function openDeleteConfirm(target: DeleteConfirmTarget) {
@@ -2226,7 +2422,7 @@ export function UniversalImportClient({
       }
 
       handleApplyRule(data.template);
-      setRuleStatus(`规则“${data.template.ruleName}”已复制，可继续调整后保存。`);
+      setRuleStatus(`规则"${data.template.ruleName}"已复制，可继续调整后保存。`);
       setStatus(`已复制规则 ${data.template.ruleName}，当前编辑区已同步到新副本规则。`);
       await loadRules();
     } catch (error) {
@@ -2268,6 +2464,32 @@ export function UniversalImportClient({
     }
 
     return Boolean(selectedRuleId || headers.length > 0 || aiConfidenceReport.length > 0);
+  }
+
+  function applyPresetToRows() {
+    const preset = presetReceivers.find((p) => p.id === selectedPresetId);
+    if (!preset) {
+      pushToast("请先选择一个预设收货信息。", "error");
+      return;
+    }
+    const targetIds = selectedIds.length > 0 ? new Set(selectedIds) : new Set(draftRows.map((row) => row.id));
+
+    setDraftRows((current) =>
+      current.map((row) => {
+        if (!targetIds.has(row.id)) return row;
+        return {
+          ...row,
+          receiverStore: preset.receiverStore || row.receiverStore,
+          receiverName: preset.receiverName || row.receiverName,
+          receiverPhone: preset.receiverPhone || row.receiverPhone,
+          receiverAddress: preset.receiverAddress || row.receiverAddress,
+        };
+      }),
+    );
+
+    const targetCount = selectedIds.length > 0 ? selectedIds.length : draftRows.length;
+    pushToast(`已将预设 "${preset.label || preset.receiverStore}" 应用到 ${targetCount} 行。`, "success");
+    setSelectedPresetId("");
   }
 
   function handleCellChange(rowId: string, field: UniversalImportField, value: string) {
@@ -2329,11 +2551,21 @@ export function UniversalImportClient({
       setStatus("请先导入并试解析文件。");
       return;
     }
-    const immediateValidation = validateImportRows(draftRows, existingExternalCodes);
+
+    const rowsToSubmit = selectedIds.length > 0
+      ? draftRows.filter((row) => selectedIds.includes(row.id))
+      : draftRows;
+
+    if (rowsToSubmit.length === 0) {
+      setStatus("请先勾选要提交的数据行。");
+      return;
+    }
+
+    const immediateValidation = validateImportRows(rowsToSubmit, existingExternalCodes);
     if (immediateValidation.issues.length > 0) {
       const issues = immediateValidation.issues.map((issue) => formatIssueLabel(issue));
       setSubmitBlockingIssues(issues);
-      setStatus(`存在 ${immediateValidation.issues.length} 个未修正问题，请先处理后再提交。`);
+      setStatus(`选中行存在 ${immediateValidation.issues.length} 个未修正问题，请先处理后再提交。`);
       pushToast("提交被阻止，请先查看并修正错误明细。", "error");
       return;
     }
@@ -2343,8 +2575,8 @@ export function UniversalImportClient({
       active: true,
       value: 12,
       label: "正在提交...",
-      processed: getProcessedCountFromProgress(12, draftRows.length),
-      total: draftRows.length,
+      processed: getProcessedCountFromProgress(12, rowsToSubmit.length),
+      total: rowsToSubmit.length,
     });
 
     const timer = window.setInterval(() => {
@@ -2374,7 +2606,7 @@ export function UniversalImportClient({
           mapping,
           fingerprint,
           ruleId: selectedRuleId,
-          rows: draftRows,
+          rows: rowsToSubmit,
         }),
       });
       const data = (await response.json()) as {
@@ -2393,7 +2625,7 @@ export function UniversalImportClient({
         throw new Error(data.error ?? "提交导入失败，请稍后重试。");
       }
       const summary = {
-        successCount: data.summary?.successCount ?? draftRows.length,
+        successCount: data.summary?.successCount ?? rowsToSubmit.length,
         failCount: data.summary?.failCount ?? 0,
         shipmentCount: data.summary?.shipmentCount ?? 0,
         failedShipmentCount: data.summary?.failedShipmentCount ?? 0,
@@ -2407,8 +2639,8 @@ export function UniversalImportClient({
         active: true,
         value: 100,
         label: summary.failCount > 0 ? "部分完成" : "完成",
-        processed: draftRows.length,
-        total: draftRows.length,
+        processed: rowsToSubmit.length,
+        total: rowsToSubmit.length,
       });
       setStatus(statusMessage);
       setSubmitSummary({
@@ -2609,36 +2841,46 @@ export function UniversalImportClient({
   const submitBlockedHint = !selectedRuleId
     ? "请先手动选择解析规则后再提交。"
     : hasBlockingErrors
-      ? `存在 ${rowErrorSummary.length} 个未修正问题，请先修正后再提交。`
+      ? selectedIds.length > 0
+        ? `选中行存在 ${selectedErrorCount ?? 0} 个未修正问题，请先修正后再提交。`
+        : `存在 ${rowErrorSummary.length} 个未修正问题，请先修正后再提交。`
       : "";
   const currentMenuTitle =
     activeTab === "rules" ? "规则管理" : activeTab === "history" ? "历史运单" : "运单管理";
 
   return (
     <main className="dashboard-shell">
-      <aside className="dashboard-sidebar">
-        <div className="sidebar-brand">
-          <div className="brand-logo">AI</div>
-          <div className="brand-copy">
-            <strong>智能多格式批量下单系统</strong>
-          </div>
-        </div>
-
-        <nav className="sidebar-nav" aria-label="系统菜单">
-          {renderSidebarMenus(UNIVERSAL_SIDEBAR_MENUS)}
-        </nav>
-      </aside>
-
       <div className="dashboard-main">
         <header className="global-topbar">
           <div className="global-topbar-nav">
-            <span className="global-nav-current">{currentMenuTitle}</span>
+            <span className="brand-tag">AI</span>
+            <strong className="brand-title">智能多格式批量下单系统</strong>
           </div>
         </header>
 
         <section className="workspace-shell">
           <div className="workspace-tabbar">
-            <span className="workspace-tab-current">{currentMenuTitle}</span>
+            <button
+              type="button"
+              className={`workspace-tab ${activeTab === "import" ? "active" : ""}`}
+              onClick={() => setActiveTab("import")}
+            >
+              运单管理
+            </button>
+            <button
+              type="button"
+              className={`workspace-tab ${activeTab === "history" ? "active" : ""}`}
+              onClick={() => setActiveTab("history")}
+            >
+              历史运单
+            </button>
+            <button
+              type="button"
+              className={`workspace-tab ${activeTab === "rules" ? "active" : ""}`}
+              onClick={() => setActiveTab("rules")}
+            >
+              规则管理
+            </button>
           </div>
 
           <div className="workspace-stage">
@@ -2772,10 +3014,10 @@ export function UniversalImportClient({
                     </div>
 
                     <div className="toolbar import-action-toolbar" style={{ marginTop: 16 }}>
-                      <button type="button" className="primary-button" onClick={() => void handleAiSuggest()} disabled={!selectedFile || aiSuggesting}>
+                      <button type="button" className="primary-button" onClick={() => void handleAiSuggest()} disabled={!selectedFile && headers.length === 0 || aiSuggesting}>
                         {aiSuggesting ? "AI 生成中..." : "AI 生成规则建议"}
                       </button>
-                      <button type="button" className="secondary-button" onClick={() => void handleTestCurrentRule()} disabled={!selectedFile || !selectedRuleId}>
+                      <button type="button" className="secondary-button" onClick={() => void handleTestCurrentRule()} disabled={!selectedFile && draftRows.length === 0}>
                         试解析选中规则
                       </button>
                       <button type="button" className="tool-button quiet" onClick={exportPreview} disabled={draftRows.length === 0}>
@@ -2801,7 +3043,7 @@ export function UniversalImportClient({
                           <button type="button" className="secondary-button" onClick={() => setActiveTab("rules")}>
                             前往规则管理
                           </button>
-                          <button type="button" className="primary-button" onClick={() => void handleAiSuggest()} disabled={!selectedFile || aiSuggesting}>
+                          <button type="button" className="primary-button" onClick={() => void handleAiSuggest()} disabled={!selectedFile && headers.length === 0 || aiSuggesting}>
                             {aiSuggesting ? "AI 分析中..." : "重新生成 AI 规则"}
                           </button>
                         </div>
@@ -2866,18 +3108,24 @@ export function UniversalImportClient({
                       <div className="mapping-grid">
                         <div className="mapping-source-note">
                           <strong>AI 推荐表头行：第 {activeHeaderRowIndex + 1} 行</strong>
-                          <span>下拉项已按 AI 推荐规则展示列号、表头和样例值；带“需确认”的字段请人工复核后再保存。</span>
+                          <span>下拉项已按 AI 推荐规则展示列号、表头和样例值；带"需确认"的字段请人工复核后再保存。</span>
                         </div>
                         {UNIVERSAL_IMPORT_FIELDS.map((field) => {
                           const aiStatus = getAiMappingStatus(aiConfidenceByField.get(field.key));
                           const currentColumn = mapping[field.key];
                           const availableTailSourceOptions = getAvailableTailSourceOptions(ruleDsl, field.key, tailSourceOptions);
                           const defaultValue = getRuleDefaultValue(ruleDsl, field.key);
+                          const displayLabel = getFieldDisplayLabel(field.key, ruleDsl.fieldLabels);
 
                           return (
                             <label className="mapping-row" key={field.key}>
                               <span className="mapping-label">
-                                <span>{field.label}{field.required ? "*" : ""}</span>
+                                <span>{displayLabel}{field.required ? "*" : ""}</span>
+                                {getFieldLabelOptions(field.key).length > 0 && ruleDsl.fieldLabels?.[field.key] && (
+                                  <small className="field-label-hint" title={`原始字段名：${field.label}`}>
+                                    ({field.label})
+                                  </small>
+                                )}
                                 <em className={`ai-confidence-badge ${aiStatus.tone}`}>{aiStatus.label}</em>
                               </span>
                               <select
@@ -2917,7 +3165,7 @@ export function UniversalImportClient({
                             <button type="button" className="secondary-button" onClick={() => void handleTestDraftRule()} disabled={!selectedFile}>
                               试解析当前 AI 建议
                             </button>
-                            <button type="button" className="primary-button" onClick={() => void handleConfirmAiSuggestionSave()} disabled={!selectedFile || headers.length === 0}>
+                            <button type="button" className="primary-button" onClick={() => void handleConfirmAiSuggestionSave()} disabled={headers.length === 0}>
                               确认 AI 建议并保存为规则
                             </button>
                           </div>
@@ -3016,6 +3264,41 @@ export function UniversalImportClient({
                           </table>
                         </div>
 
+                        {presetReceivers.length > 0 && draftRows.length > 0 ? (
+                          <div className="toolbar preset-quick-toolbar" style={{ marginBottom: 12 }}>
+                            <label className="preset-quick-label">
+                              <span>快速填充收货信息：</span>
+                              <select
+                                value={selectedPresetId}
+                                onChange={(event) => setSelectedPresetId(event.target.value)}
+                              >
+                                <option value="">— 选择预设 —</option>
+                                {presetReceivers.map((preset) => (
+                                  <option value={preset.id} key={preset.id}>
+                                    {preset.label || preset.receiverStore || preset.receiverName}
+                                    {preset.receiverStore ? `（${preset.receiverStore}）` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              disabled={!selectedPresetId}
+                              onClick={applyPresetToRows}
+                              title={
+                                selectedIds.length > 0
+                                  ? `将选中预设应用到已勾选的 ${selectedIds.length} 行`
+                                  : "将选中预设应用到全部行"
+                              }
+                            >
+                              {selectedIds.length > 0
+                                ? `应用到选中行（${selectedIds.length}）`
+                                : "应用到全部行"}
+                            </button>
+                          </div>
+                        ) : null}
+
                         <div className="table-shell import-table-shell">
                           <table className="data-table import-table">
                           <thead>
@@ -3030,7 +3313,7 @@ export function UniversalImportClient({
                               <th>行号</th>
                               {UNIVERSAL_IMPORT_FIELDS.map((field) => (
                                 <th key={field.key}>
-                                  {field.label}
+                                  {getFieldDisplayLabel(field.key, ruleDsl.fieldLabels)}
                                   {field.required ? "*" : ""}
                                 </th>
                               ))}
@@ -3068,6 +3351,7 @@ export function UniversalImportClient({
                                   {UNIVERSAL_IMPORT_FIELDS.map((field) => {
                                     const issue = rowIssues.find((item) => item.field === field.key);
                                     const showDuplicateNotice = field.key === "externalCode" && duplicateNotice;
+                                    const displayLabel = getFieldDisplayLabel(field.key, ruleDsl.fieldLabels);
                                     return (
                                       <td key={field.key}>
                                         <input
@@ -3082,8 +3366,8 @@ export function UniversalImportClient({
                                           value={row[field.key]}
                                           onChange={(event) => handleCellChange(row.id, field.key, event.target.value)}
                                           onKeyDown={(event) => handleCellKeyDown(event, row.id, field.key)}
-                                          placeholder={field.label}
-                                          title={issue?.message ?? duplicateNotice ?? field.label}
+                                          placeholder={displayLabel}
+                                          title={issue?.message ?? duplicateNotice ?? displayLabel}
                                         />
                                         {issue ? <span className="cell-error">{issue.message}</span> : null}
                                         {showDuplicateNotice ? (
@@ -3261,9 +3545,9 @@ export function UniversalImportClient({
                     className="primary-button"
                     onClick={() => void submitImport()}
                     disabled={submitting || draftRows.length === 0 || hasBlockingErrors || !selectedRuleId}
-                    title={submitBlockedHint || "提交下单"}
+                    title={submitBlockedHint || (selectedIds.length > 0 ? `提交勾选的 ${selectedCount} 条数据下单` : "提交下单")}
                   >
-                    {submitting ? "提交中..." : "提交下单"}
+                    {submitting ? "提交中..." : selectedIds.length > 0 ? `提交选中行下单 (${selectedCount}/${totalCount})` : "提交下单"}
                   </button>
                   {submitBlockedHint ? (
                     <span className="submit-blocked-hint">{submitBlockedHint}</span>
@@ -3660,9 +3944,9 @@ export function UniversalImportClient({
                     </div>
 
                     <div className="toolbar rule-editor-toolbar rule-editor-toolbar-sticky" style={{ marginTop: 16 }}>
-                      <button type="button" className="tool-button quiet" onClick={() => void handleSaveCurrentRule()}>新建空白规则</button>
+                      <button type="button" className="tool-button quiet" onClick={openNewRuleDialog}>新建规则</button>
                       <button type="button" className="secondary-button" onClick={() => void handleTestCurrentRule()} disabled={!selectedFile}>试解析当前规则</button>
-                      <button type="button" className="secondary-button accent" onClick={() => void handleConfirmAiSuggestionSave()} disabled={!selectedFile || headers.length === 0}>
+                      <button type="button" className="secondary-button accent" onClick={() => void handleConfirmAiSuggestionSave()} disabled={headers.length === 0}>
                         采用 AI 建议并保存规则
                       </button>
                       <button type="button" className="primary-button" onClick={() => void handleUpdateSelectedRule()} disabled={!selectedRuleId}>保存当前编辑规则</button>
@@ -3688,11 +3972,28 @@ export function UniversalImportClient({
                             const currentColumn = mapping[field.key];
                             const availableTailSourceOptions = getAvailableTailSourceOptions(ruleDsl, field.key, tailSourceOptions);
                             const defaultValue = getRuleDefaultValue(ruleDsl, field.key);
+                            const labelOptions = getFieldLabelOptions(field.key);
+                            const currentLabel = getFieldDisplayLabel(field.key, ruleDsl.fieldLabels);
 
                             return (
                               <label className="mapping-row" key={field.key}>
                                 <span className="mapping-label">
-                                  <span>{field.label}{field.required ? "*" : ""}</span>
+                                  <span>{currentLabel}{field.required ? "*" : ""}</span>
+                                  {labelOptions.length > 0 && (
+                                    <select
+                                      className="field-label-select"
+                                      value={ruleDsl.fieldLabels?.[field.key] ?? ""}
+                                      onChange={(event) => handleFieldLabelChange(field.key, event.target.value)}
+                                      title="选择字段标签"
+                                    >
+                                      <option value="">默认：{field.label}</option>
+                                      {labelOptions.map((option) => (
+                                        <option value={option} key={option}>
+                                          {option}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
                                   <em className={`ai-confidence-badge ${aiStatus.tone}`}>{aiStatus.label}</em>
                                 </span>
                                 <select
@@ -3725,7 +4026,65 @@ export function UniversalImportClient({
                           })}
                         </div>
                       ) : (
-                        <div className="empty-row rule-editor-empty with-illustration">可直接点击“新建空白规则”创建规则；如需配置字段映射，请上传样例文件生成 AI 建议，或应用一条带样例表头的已保存规则。</div>
+                        <div className="empty-row rule-editor-empty with-illustration">可直接点击"新建规则"创建规则；如需配置字段映射，请上传样例文件生成 AI 建议，或应用一条带样例表头的已保存规则。</div>
+                      )}
+                    </div>
+
+                    <div className="rule-editor-section">
+                      <div className="card-heading compact">
+                        <div>
+                          <p className="section-kicker">预设收货信息</p>
+                          <h3>预设收货方</h3>
+                        </div>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => openPresetEditor("add")}
+                        >
+                          添加收货信息
+                        </button>
+                      </div>
+                      {presetReceivers.length === 0 ? (
+                        <div className="empty-row rule-editor-empty">
+                          暂未配置预设收货信息，点击"添加收货信息"可配置导入时可快速选取的门店/收件人数据。
+                        </div>
+                      ) : (
+                        <div className="preset-receiver-list">
+                          {presetReceivers.map((preset, index) => (
+                            <div className="preset-receiver-card" key={preset.id ?? index}>
+                              <div className="preset-card-info">
+                                <strong className="preset-card-label">
+                                  {preset.label || preset.receiverStore || preset.receiverName || "未命名"}
+                                </strong>
+                                <span className="preset-card-detail">
+                                  <span title="收货门店">{preset.receiverStore || "—"}</span>
+                                  <span className="preset-sep">|</span>
+                                  <span title="收件人">{preset.receiverName || "—"}</span>
+                                  <span className="preset-sep">|</span>
+                                  <span title="电话">{preset.receiverPhone || "—"}</span>
+                                  <span className="preset-sep">|</span>
+                                  <span title="地址">{preset.receiverAddress || "—"}</span>
+                                </span>
+                              </div>
+                              <div className="preset-card-actions">
+                                <button
+                                  type="button"
+                                  className="text-link-button"
+                                  onClick={() => openPresetEditor("edit", index)}
+                                >
+                                  编辑
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-link-button"
+                                  onClick={() => deletePresetReceiver(index)}
+                                >
+                                  删除
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
 
@@ -3846,7 +4205,7 @@ export function UniversalImportClient({
                           {ruleLoading ? (
                             <tr><td colSpan={7} className="empty-row">正在加载规则列表...</td></tr>
                           ) : ruleList.length === 0 ? (
-                            <tr><td colSpan={7} className="empty-row">暂无已保存规则，可点击上方“新建空白规则”开始配置。</td></tr>
+                            <tr><td colSpan={7} className="empty-row">暂无已保存规则，可点击上方"新建规则"开始配置。</td></tr>
                           ) : (
                             ruleList.map((rule) => (
                               <tr key={rule.id} className={selectedRuleId === rule.id ? "rule-row-active" : ""}>
@@ -3922,6 +4281,256 @@ export function UniversalImportClient({
                 disabled={historyDeleting || ruleDeleting}
               >
                 {historyDeleting || ruleDeleting ? "删除中..." : "确认"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {presetEditorOpen ? (
+        <div className="confirm-backdrop" role="presentation" onClick={closePresetEditor}>
+          <div
+            className="preset-receiver-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="preset-editor-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="delete-confirm-header">
+              <h2 id="preset-editor-title">
+                {presetEditorMode === "edit" ? "编辑预设收货信息" : "添加预设收货信息"}
+              </h2>
+              <button
+                type="button"
+                className="delete-confirm-close"
+                onClick={closePresetEditor}
+                aria-label="关闭"
+              >
+                ×
+              </button>
+            </div>
+            <div className="preset-receiver-form">
+              <label className="preset-form-row">
+                <span>标签名</span>
+                <input
+                  value={presetEditorData.label}
+                  onChange={(event) =>
+                    setPresetEditorData((current) => ({ ...current, label: event.target.value }))
+                  }
+                  placeholder="用于区分多个预设，如「总仓-西区」"
+                />
+              </label>
+              <label className="preset-form-row">
+                <span>收货门店 *</span>
+                <input
+                  value={presetEditorData.receiverStore}
+                  onChange={(event) =>
+                    setPresetEditorData((current) => ({ ...current, receiverStore: event.target.value }))
+                  }
+                  placeholder="如：西区万达店"
+                />
+              </label>
+              <label className="preset-form-row">
+                <span>收件人姓名 *</span>
+                <input
+                  value={presetEditorData.receiverName}
+                  onChange={(event) =>
+                    setPresetEditorData((current) => ({ ...current, receiverName: event.target.value }))
+                  }
+                  placeholder="如：张三"
+                />
+              </label>
+              <label className="preset-form-row">
+                <span>联系方式</span>
+                <input
+                  value={presetEditorData.receiverPhone}
+                  onChange={(event) =>
+                    setPresetEditorData((current) => ({ ...current, receiverPhone: event.target.value }))
+                  }
+                  placeholder="如：13800138000"
+                />
+              </label>
+              <label className="preset-form-row">
+                <span>收件人地址</span>
+                <input
+                  value={presetEditorData.receiverAddress}
+                  onChange={(event) =>
+                    setPresetEditorData((current) => ({ ...current, receiverAddress: event.target.value }))
+                  }
+                  placeholder="如：XX市XX区XX路100号"
+                />
+              </label>
+            </div>
+            <div className="delete-confirm-actions">
+              <button type="button" className="secondary-button" onClick={closePresetEditor}>
+                取消
+              </button>
+              <button type="button" className="primary-button" onClick={savePresetReceiver}>
+                {presetEditorMode === "edit" ? "保存修改" : "添加"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {newRuleDialogOpen ? (
+        <div className="confirm-backdrop" role="presentation" onClick={closeNewRuleDialog}>
+          <div
+            className="preset-receiver-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-rule-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="delete-confirm-header">
+              <h2 id="new-rule-dialog-title">新建规则</h2>
+              <button
+                type="button"
+                className="delete-confirm-close"
+                onClick={closeNewRuleDialog}
+                aria-label="关闭"
+              >
+                ×
+              </button>
+            </div>
+            <p className="form-desc" style={{ margin: "0 0 14px", color: "var(--muted)", fontSize: "0.88rem" }}>
+              填写收货信息，保存后导入时可快速填充到数据行。均可选填。
+            </p>
+            <div className="preset-receiver-form">
+              <label className="preset-form-row">
+                <span>收货门店</span>
+                <input
+                  value={newRuleForm.receiverStore}
+                  onChange={(event) =>
+                    setNewRuleForm((current) => ({ ...current, receiverStore: event.target.value }))
+                  }
+                  placeholder="如：西区万达店"
+                />
+              </label>
+              <label className="preset-form-row">
+                <span>收件人姓名</span>
+                <input
+                  value={newRuleForm.receiverName}
+                  onChange={(event) =>
+                    setNewRuleForm((current) => ({ ...current, receiverName: event.target.value }))
+                  }
+                  placeholder="如：张三"
+                />
+              </label>
+              <label className="preset-form-row">
+                <span>联系方式</span>
+                <input
+                  value={newRuleForm.receiverPhone}
+                  onChange={(event) =>
+                    setNewRuleForm((current) => ({ ...current, receiverPhone: event.target.value }))
+                  }
+                  placeholder="如：13800138000"
+                />
+              </label>
+              <label className="preset-form-row">
+                <span>收件人地址</span>
+                <input
+                  value={newRuleForm.receiverAddress}
+                  onChange={(event) =>
+                    setNewRuleForm((current) => ({ ...current, receiverAddress: event.target.value }))
+                  }
+                  placeholder="如：XX市XX区XX路100号"
+                />
+              </label>
+            </div>
+            <div className="delete-confirm-actions">
+              <button type="button" className="secondary-button" onClick={closeNewRuleDialog}>
+                取消
+              </button>
+              <button type="button" className="primary-button" onClick={() => void confirmNewRule()}>
+                保存规则
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {editRuleDialogOpen ? (
+        <div className="confirm-backdrop" role="presentation" onClick={closeEditRuleDialog}>
+          <div
+            className="preset-receiver-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-rule-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="delete-confirm-header">
+              <h2 id="edit-rule-dialog-title">编辑规则</h2>
+              <button
+                type="button"
+                className="delete-confirm-close"
+                onClick={closeEditRuleDialog}
+                aria-label="关闭"
+              >
+                ×
+              </button>
+            </div>
+            <p className="form-desc" style={{ margin: "0 0 14px", color: "var(--muted)", fontSize: "0.88rem" }}>
+              修改规则名称与收货信息，保存后生效。
+            </p>
+            <div className="preset-receiver-form">
+              <label className="preset-form-row">
+                <span>规则名称</span>
+                <input
+                  value={editRuleForm.ruleName}
+                  onChange={(event) =>
+                    setEditRuleForm((current) => ({ ...current, ruleName: event.target.value }))
+                  }
+                  placeholder="如：西区配送单规则"
+                />
+              </label>
+              <label className="preset-form-row">
+                <span>收货门店</span>
+                <input
+                  value={editRuleForm.receiverStore}
+                  onChange={(event) =>
+                    setEditRuleForm((current) => ({ ...current, receiverStore: event.target.value }))
+                  }
+                  placeholder="如：西区万达店"
+                />
+              </label>
+              <label className="preset-form-row">
+                <span>收件人姓名</span>
+                <input
+                  value={editRuleForm.receiverName}
+                  onChange={(event) =>
+                    setEditRuleForm((current) => ({ ...current, receiverName: event.target.value }))
+                  }
+                  placeholder="如：张三"
+                />
+              </label>
+              <label className="preset-form-row">
+                <span>联系方式</span>
+                <input
+                  value={editRuleForm.receiverPhone}
+                  onChange={(event) =>
+                    setEditRuleForm((current) => ({ ...current, receiverPhone: event.target.value }))
+                  }
+                  placeholder="如：13800138000"
+                />
+              </label>
+              <label className="preset-form-row">
+                <span>收件人地址</span>
+                <input
+                  value={editRuleForm.receiverAddress}
+                  onChange={(event) =>
+                    setEditRuleForm((current) => ({ ...current, receiverAddress: event.target.value }))
+                  }
+                  placeholder="如：XX市XX区XX路100号"
+                />
+              </label>
+            </div>
+            <div className="delete-confirm-actions">
+              <button type="button" className="secondary-button" onClick={closeEditRuleDialog}>
+                取消
+              </button>
+              <button type="button" className="primary-button" onClick={() => void confirmEditRule()}>
+                保存修改
               </button>
             </div>
           </div>
