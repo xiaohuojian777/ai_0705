@@ -1,3 +1,0 @@
-ALTER TABLE "UniversalImportShipmentItem"
-ALTER COLUMN "skuQuantity" TYPE DOUBLE PRECISION
-USING "skuQuantity"::DOUBLE PRECISION;

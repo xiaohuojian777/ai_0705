@@ -12,6 +12,8 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 
+export const runtime = "nodejs";
+
 async function ensureExamModeAccess() {
   // 考试模式不包含登录模块，规则管理 API 直接开放使用。
   return null;
@@ -106,7 +108,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ template });
   } catch (error) {
     console.error("POST /api/universal-import/templates failed", error);
-    return NextResponse.json({ error: "保存规则失败，请稍后重试。" }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error ?? "");
+    console.error("POST error detail:", message);
+    // Prisma known error codes for better debugging
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      console.error("Prisma error code:", error.code, "meta:", error.meta);
+      return NextResponse.json(
+        { error: `数据库写入失败（${error.code}）：${error.message}` },
+        { status: 500 },
+      );
+    }
+    if (error instanceof Prisma.PrismaClientValidationError) {
+      return NextResponse.json(
+        { error: `数据验证失败：${error.message}` },
+        { status: 500 },
+      );
+    }
+    return NextResponse.json(
+      { error: message || "保存规则失败，请稍后重试。" },
+      { status: 500 },
+    );
   }
 }
 

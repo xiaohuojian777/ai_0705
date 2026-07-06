@@ -27,6 +27,10 @@ function parseJsonField<T>(rawValue: string, fieldName: string) {
   }
 }
 
+function hasAnyNonNullMapping(mapping: UniversalImportMapping): boolean {
+  return Object.values(mapping).some((value) => value !== null);
+}
+
 export async function POST(request: Request) {
   try {
     const unauthorizedResponse = await ensureExamModeAccess();
@@ -58,12 +62,18 @@ export async function POST(request: Request) {
     });
 
     const inferredMapping = inferMappingFromHeaders(document.headers);
-    const mapping = mappingRaw
+    let mapping = mappingRaw
       ? parseJsonField<UniversalImportMapping>(mappingRaw, "字段映射")
       : inferredMapping;
-    const ruleDsl = ruleDslRaw
+    if (!hasAnyNonNullMapping(mapping)) {
+      mapping = inferredMapping;
+    }
+    let ruleDsl = ruleDslRaw
       ? parseJsonField<UniversalImportRuleDsl>(ruleDslRaw, "解析规则 DSL")
       : createDefaultRuleDsl(mapping, fileType);
+    if (!hasAnyNonNullMapping(ruleDsl.mapping)) {
+      ruleDsl = createDefaultRuleDsl(mapping, fileType);
+    }
 
     const result = await executeUniversalImportRule({
       fileBuffer,

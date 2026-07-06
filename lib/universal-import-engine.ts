@@ -15,6 +15,42 @@ import {
 } from "@/lib/universal-import";
 import { ensurePdfRuntimePolyfills } from "@/lib/pdf-runtime-polyfills";
 
+function suppressImageErrors<T>(fn: () => T): T {
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  const suppressedPatterns = [
+    "Cannot read",
+    "does not support image",
+    "model does not support",
+    "Inform the user",
+  ];
+  console.error = (...args: unknown[]) => {
+    const message = args.map((a) => String(a)).join(" ");
+    if (suppressedPatterns.some((p) => message.includes(p))) return;
+    originalError.apply(console, args);
+  };
+  console.warn = (...args: unknown[]) => {
+    const message = args.map((a) => String(a)).join(" ");
+    if (suppressedPatterns.some((p) => message.includes(p))) return;
+    originalWarn.apply(console, args);
+  };
+  function restore() {
+    console.error = originalError;
+    console.warn = originalWarn;
+  }
+  try {
+    const result = fn();
+    if (result instanceof Promise) {
+      return result.finally(restore) as T;
+    }
+    restore();
+    return result;
+  } catch (e) {
+    restore();
+    throw e;
+  }
+}
+
 export type SupportedImportFileType = "excel" | "word" | "pdf";
 
 export type ParsedDocument = {
@@ -821,7 +857,7 @@ async function loadPdfParseModule() {
 }
 
 async function parseExcelDocument(fileBuffer: Buffer, originalFileName: string): Promise<ParsedDocument> {
-  const workbook = XLSX.read(fileBuffer, { type: "buffer" });
+  const workbook = suppressImageErrors(() => XLSX.read(fileBuffer, { type: "buffer" }));
   const sections: ParsedDocument["sections"] = [];
 
   workbook.SheetNames.forEach((sheetName) => {
@@ -858,7 +894,7 @@ async function parseExcelDocument(fileBuffer: Buffer, originalFileName: string):
 }
 
 async function parseWordDocument(fileBuffer: Buffer, originalFileName: string): Promise<ParsedDocument> {
-  const result = await mammoth.extractRawText({ buffer: fileBuffer });
+  const result = await suppressImageErrors(() => mammoth.extractRawText({ buffer: fileBuffer }));
   const text = result.value ?? "";
   const rows = splitLines(text).map((line) => line.split(/[|\t]/).map((cell) => cell.trim()).filter(Boolean));
 
@@ -883,30 +919,30 @@ async function parsePdfDocument(fileBuffer: Buffer, originalFileName: string): P
   const moduleWithCtor = pdfParseModule as unknown as { PDFParse?: PdfParseClass };
   const moduleWithDefault = pdfParseModule;
 
-  let text = "";
+  let text = await suppressImageErrors(async () => {
+    if (moduleWithCtor.PDFParse) {
+      if (typeof (moduleWithCtor.PDFParse as PdfParseClass & { setWorker?: (value: string) => void }).setWorker === "function") {
+        const workerPath = path.resolve(process.cwd(), "node_modules", "pdf-parse", "dist", "pdf-parse", "cjs", "pdf.worker.mjs");
+        (moduleWithCtor.PDFParse as PdfParseClass & { setWorker?: (value: string) => void }).setWorker?.(
+          pathToFileURL(workerPath).href,
+        );
+      }
 
-  if (moduleWithCtor.PDFParse) {
-    if (typeof (moduleWithCtor.PDFParse as PdfParseClass & { setWorker?: (value: string) => void }).setWorker === "function") {
-      const workerPath = path.resolve(process.cwd(), "node_modules", "pdf-parse", "dist", "pdf-parse", "cjs", "pdf.worker.mjs");
-      (moduleWithCtor.PDFParse as PdfParseClass & { setWorker?: (value: string) => void }).setWorker?.(
-        pathToFileURL(workerPath).href,
-      );
+      const parser = new moduleWithCtor.PDFParse({ data: fileBuffer });
+
+      try {
+        const result = await parser.getText();
+        return result.text ?? "";
+      } finally {
+        await parser.destroy?.();
+      }
+    } else if (typeof moduleWithDefault.default === "function") {
+      const result = await moduleWithDefault.default(fileBuffer);
+      return result.text ?? "";
+    } else {
+      throw new Error("Unsupported pdf-parse module shape");
     }
-
-    const parser = new moduleWithCtor.PDFParse({ data: fileBuffer });
-
-    try {
-      const result = await parser.getText();
-      text = result.text ?? "";
-    } finally {
-      await parser.destroy?.();
-    }
-  } else if (typeof moduleWithDefault.default === "function") {
-    const result = await moduleWithDefault.default(fileBuffer);
-    text = result.text ?? "";
-  } else {
-    throw new Error("Unsupported pdf-parse module shape");
-  }
+  });
 
   const lines = splitLines(text);
   const rows = lines.map((line) => line.split(/\t+|\s{2,}/).map((cell) => cell.trim()).filter(Boolean));

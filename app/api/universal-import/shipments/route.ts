@@ -203,7 +203,6 @@ export async function GET(request: Request) {
       andFilters.push({
         externalCode: {
           contains: externalCode,
-          mode: "insensitive",
         },
       });
     }
@@ -214,7 +213,6 @@ export async function GET(request: Request) {
           {
             receiverName: {
               contains: receiverName,
-              mode: "insensitive",
             },
           },
           {
@@ -222,7 +220,6 @@ export async function GET(request: Request) {
               some: {
                 receiverName: {
                   contains: receiverName,
-                  mode: "insensitive",
                 },
               },
             },
@@ -237,19 +234,16 @@ export async function GET(request: Request) {
           {
             externalCode: {
               contains: query,
-              mode: "insensitive",
             },
           },
           {
             receiverName: {
               contains: query,
-              mode: "insensitive",
             },
           },
           {
             receiverStore: {
               contains: query,
-              mode: "insensitive",
             },
           },
           {
@@ -259,13 +253,11 @@ export async function GET(request: Request) {
                   {
                     receiverName: {
                       contains: query,
-                      mode: "insensitive",
                     },
                   },
                   {
                     receiverStore: {
                       contains: query,
-                      mode: "insensitive",
                     },
                   },
                 ],
@@ -276,7 +268,6 @@ export async function GET(request: Request) {
             batch: {
               batchName: {
                 contains: query,
-                mode: "insensitive",
               },
             },
           },
@@ -284,7 +275,6 @@ export async function GET(request: Request) {
             batch: {
               originalFileName: {
                 contains: query,
-                mode: "insensitive",
               },
             },
           },
@@ -506,28 +496,23 @@ export async function POST(request: Request) {
       });
     });
 
-    if (!body.ruleId?.trim()) {
-      return NextResponse.json(
-        { error: "请先手动选择解析规则后再提交，系统不会按文件自动匹配规则。" },
-        { status: 400 },
-      );
-    }
+    let ruleId: string | null = null;
+    let ruleVersion: number | null = null;
 
-    const rule = await prisma.universalImportRule.findUnique({
-      where: {
-        id: body.ruleId.trim(),
-      },
-      select: {
-        id: true,
-        version: true,
-      },
-    });
-
-    if (!rule) {
-      return NextResponse.json(
-        { error: "选中的解析规则不存在，请重新选择规则。" },
-        { status: 400 },
-      );
+    if (body.ruleId?.trim()) {
+      const rule = await prisma.universalImportRule.findUnique({
+        where: {
+          id: body.ruleId.trim(),
+        },
+        select: {
+          id: true,
+          version: true,
+        },
+      });
+      if (rule) {
+        ruleId = rule.id;
+        ruleVersion = rule.version;
+      }
     }
 
     const batch = await prisma.universalImportBatch.create({
@@ -536,8 +521,8 @@ export async function POST(request: Request) {
         originalFileName: body.originalFileName?.trim() || "",
         sourceSheetName: body.sheetName?.trim() || "",
         fileType: body.fileType?.trim() || "excel",
-        ruleId: rule.id,
-        ruleVersion: rule.version,
+        ruleId,
+        ruleVersion,
         totalRows: rows.length,
         successRows: 0,
         failedRows: rows.length,

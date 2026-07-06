@@ -9,8 +9,8 @@ datasource db {
 
 model UserAccount {
   id           String   @id @default(cuid())
-  username     String   @unique @db.VarChar(8)
-  passwordHash String   @db.VarChar(200)
+  username     String   @unique 
+  passwordHash String   
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
@@ -23,40 +23,40 @@ model Message {
 
 model FeeType {
   id             String   @id @default(cuid())
-  feeCode        String   @unique @db.VarChar(8)
-  feeName        String   @db.VarChar(32)
-  businessDomain String   @db.VarChar(16)
-  quoteTypes     String[]
-  note           String?  @db.VarChar(256)
-  createdBy      String   @db.VarChar(32)
+  feeCode        String   @unique 
+  feeName        String   
+  businessDomain String   
+  quoteTypes     Json
+  note           String?  
+  createdBy      String   
   createdAt      DateTime @default(now())
-  updatedBy      String   @db.VarChar(32)
+  updatedBy      String   
   updatedAt      DateTime @updatedAt
 }
 
 model FeeTypeOperationLog {
   id            String   @id @default(cuid())
-  feeTypeId     String?  @db.VarChar(32)
-  feeCode       String   @db.VarChar(8)
-  feeName       String   @db.VarChar(32)
-  operationType String   @db.VarChar(16)
-  operatorName  String   @db.VarChar(32)
-  summary       String   @db.VarChar(256)
+  feeTypeId     String?  
+  feeCode       String   
+  feeName       String   
+  operationType String   
+  operatorName  String   
+  summary       String   
   createdAt     DateTime @default(now())
 }
 
 model UniversalImportRule {
   id           String   @id @default(cuid())
-  fingerprint  String   @unique @db.VarChar(512)
-  ruleName     String   @db.VarChar(64)
-  fileType     String   @db.VarChar(16)
+  fingerprint  String   @unique 
+  ruleName     String   
+  fileType     String   
   version      Int      @default(1)
-  status       String   @db.VarChar(16)
+  status       String   
   mapping      Json
   ruleDsl      Json?
   sampleMeta   Json?
-  createdBy    String   @db.VarChar(32)
-  updatedBy    String   @db.VarChar(32)
+  createdBy    String   
+  updatedBy    String   
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   batches      UniversalImportBatch[]
@@ -64,18 +64,18 @@ model UniversalImportRule {
 
 model UniversalImportBatch {
   id               String                    @id @default(cuid())
-  batchName        String                    @db.VarChar(64)
-  originalFileName String                    @db.VarChar(128)
-  sourceSheetName  String                    @db.VarChar(64)
-  fileType         String                    @db.VarChar(16)
+  batchName        String                    
+  originalFileName String                    
+  sourceSheetName  String                    
+  fileType         String                    
   ruleId           String?
   ruleVersion      Int?
   totalRows        Int
   successRows      Int
   failedRows       Int
-  status           String                    @db.VarChar(24)
+  status           String                    
   parseSummary     Json?
-  createdBy        String                    @db.VarChar(32)
+  createdBy        String                    
   createdAt        DateTime                  @default(now())
   updatedAt        DateTime                  @updatedAt
   rule             UniversalImportRule?      @relation(fields: [ruleId], references: [id], onDelete: SetNull)
@@ -89,12 +89,12 @@ model UniversalImportShipment {
   id              String                    @id @default(cuid())
   batchId         String
   batch           UniversalImportBatch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  externalCode    String                    @db.VarChar(64)
-  receiverStore   String?                   @db.VarChar(128)
-  receiverName    String?                   @db.VarChar(64)
-  receiverPhone   String?                   @db.VarChar(32)
-  receiverAddress String?                   @db.VarChar(256)
-  note            String?                   @db.VarChar(256)
+  externalCode    String                    
+  receiverStore   String?                   
+  receiverName    String?                   
+  receiverPhone   String?                   
+  receiverAddress String?                   
+  note            String?                   
   sourceRowCount  Int
   raw             Json
   createdAt       DateTime                  @default(now())
@@ -110,11 +110,11 @@ model UniversalImportShipmentReceiverGroup {
   id              String                    @id @default(cuid())
   shipmentId      String
   shipment        UniversalImportShipment   @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
-  receiverStore   String?                   @db.VarChar(128)
-  receiverName    String?                   @db.VarChar(64)
-  receiverPhone   String?                   @db.VarChar(32)
-  receiverAddress String?                   @db.VarChar(256)
-  note            String?                   @db.VarChar(256)
+  receiverStore   String?                   
+  receiverName    String?                   
+  receiverPhone   String?                   
+  receiverAddress String?                   
+  note            String?                   
   sourceRowCount  Int
   raw             Json
   createdAt       DateTime                  @default(now())
@@ -131,10 +131,10 @@ model UniversalImportShipmentItem {
   receiverGroupId String?
   receiverGroup   UniversalImportShipmentReceiverGroup? @relation(fields: [receiverGroupId], references: [id], onDelete: SetNull)
   sourceRowIndex  Int
-  skuCode         String                            @db.VarChar(64)
-  skuName         String                            @db.VarChar(128)
+  skuCode         String                            
+  skuName         String                            
   skuQuantity     Float
-  skuSpec         String?                           @db.VarChar(128)
+  skuSpec         String?                           
   raw             Json?
   createdAt       DateTime                          @default(now())
 

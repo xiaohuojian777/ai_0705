@@ -12,6 +12,8 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 
+export const runtime = "nodejs";
+
 async function ensureExamModeAccess() {
   // 考试模式不包含登录模块，规则维护 API 直接开放使用。
   return null;
@@ -127,7 +129,18 @@ export async function PUT(request: Request, context: RouteContext) {
     return NextResponse.json({ template });
   } catch (error) {
     console.error("PUT /api/universal-import/templates/[id] failed", error);
-    return NextResponse.json({ error: "更新规则失败，请稍后重试。" }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error ?? "");
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      console.error("Prisma error code:", error.code, "meta:", error.meta);
+      return NextResponse.json(
+        { error: `数据库更新失败（${error.code}）：${error.message}` },
+        { status: 500 },
+      );
+    }
+    return NextResponse.json(
+      { error: message || "更新规则失败，请稍后重试。" },
+      { status: 500 },
+    );
   }
 }
 

@@ -1666,7 +1666,7 @@ export function UniversalImportClient({
     setStatus(
       selectedRuleId
         ? "文件已上传，请点击“试解析选中规则”。"
-        : "文件已上传，请先在“选择解析规则”中手动选择一条规则。",
+        : "文件已上传，系统将使用默认规则解析，请点击“试解析选中规则”。",
     );
     if (incompatibleRuleSelected) {
       setSelectedRuleId("");
@@ -2211,11 +2211,6 @@ export function UniversalImportClient({
   async function handleTestCurrentRule() {
     if (!selectedFile) {
       setRuleTestSummary("请先上传样例文件。");
-      return;
-    }
-    if (activeTab === "import" && !selectedRuleId) {
-      setStatus("请先手动选择解析规则，再执行试解析。");
-      setRuleTestSummary("当前版本要求上传文件后由用户手动选择规则，系统不做自动匹配。");
       return;
     }
     await handleFileParse(selectedFile, fileType, mapping, ruleDsl);
