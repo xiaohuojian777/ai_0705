@@ -340,7 +340,7 @@ const UNIVERSAL_SIDEBAR_MENUS: SidebarMenuItem[] = [
   {
     label: "万能导入",
     children: [
-      { label: "万能导入V2", href: "/universal-import" },
+      { label: "万能导入", href: "/universal-import" },
       { label: "规则管理", href: "/universal-import?tab=rules" },
       { label: "运单管理", href: "/universal-import?tab=history" },
     ],
@@ -357,6 +357,31 @@ function resolveTabParam(tab?: string | null): "import" | "history" | "rules" {
 function createRowId() {
   return globalThis.crypto.randomUUID();
 }
+
+function generateExternalCode(prefix: string, index: number) {
+  const pad = String(index).padStart(5, "0");
+  return `${prefix}-${pad}`;
+}
+
+function autoGenerateExternalCodes(rows: UniversalImportRow[]): UniversalImportRow[] {
+  const now = new Date();
+  const dateStr = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("");
+  const prefix = `AUTO-${dateStr}`;
+
+  let counter = 0;
+  return rows.map((row) => {
+    if (row.externalCode.trim()) {
+      return row;
+    }
+    counter += 1;
+    return { ...row, externalCode: generateExternalCode(prefix, counter) };
+  });
+}
+
 
 function createEmptyDraftRow(rowIndex: number): DraftRow {
   return {
@@ -1195,7 +1220,7 @@ export function UniversalImportClient({
   const [expandedMenuPaths, setExpandedMenuPaths] = useState<string[]>([
     "万能导入",
   ]);
-  const [activeMenuPath, setActiveMenuPath] = useState("万能导入/万能导入V2");
+  const [activeMenuPath, setActiveMenuPath] = useState("万能导入/万能导入");
   const deferredDraftRows = useDeferredValue(draftRows);
 
   const existingExternalCodes = useMemo(
@@ -1744,7 +1769,8 @@ export function UniversalImportClient({
     nextHeaders: string[],
     nextColumnOptions = toColumnOptions(nextHeaders),
   ) {
-    setDraftRows(toDraftRows(rows));
+    const filledRows = autoGenerateExternalCodes(rows);
+    setDraftRows(toDraftRows(filledRows));
     setPreviewRenderLimit(PREVIEW_INITIAL_RENDER_COUNT);
     setMapping(nextMapping);
     setRuleDsl(nextRuleDsl);
@@ -2480,7 +2506,7 @@ export function UniversalImportClient({
       return;
     }
 
-    setActiveMenuPath("万能导入/万能导入V2");
+    setActiveMenuPath("万能导入/万能导入");
   }, [activeTab]);
 
   useEffect(() => {
@@ -2621,10 +2647,6 @@ export function UniversalImportClient({
                 <section className="workspace-card">
                   <div className="workspace-header">
                     <div>
-                      <p className="workspace-breadcrumb">运单管理</p>
-                      <h1>运单管理</h1>
-                      <p>当前版本已支持 Excel / Word / PDF 样例试解析、AI 规则建议、规则在线编辑、历史入库与规则管理。</p>
-                    </div>
                     <div className="import-stat-grid">
                       <article className="overview-card accent">
                         <p>预览行数</p>
