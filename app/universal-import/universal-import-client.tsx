@@ -544,9 +544,12 @@ function normalizeMapping(raw: unknown): UniversalImportMapping | null {
   }
 
   const candidate = raw as Record<string, unknown>;
-  return Object.fromEntries(
-    UNIVERSAL_IMPORT_FIELDS.map((field) => [field.key, typeof candidate[field.key] === "number" ? candidate[field.key] : null]),
-  ) as UniversalImportMapping;
+  const entries = UNIVERSAL_IMPORT_FIELDS.map((field) => [field.key, typeof candidate[field.key] === "number" ? candidate[field.key] : null]);
+  // 如果所有字段都是 null，视为无映射，返回 null 让调用方使用默认值
+  if (entries.every(([, value]) => value === null)) {
+    return null;
+  }
+  return Object.fromEntries(entries) as UniversalImportMapping;
 }
 
 function getSampleHeaders(sampleMeta: unknown) {
@@ -559,7 +562,7 @@ function getSampleHeaders(sampleMeta: unknown) {
     return [];
   }
 
-  return headers.map((header) => String(header ?? ""));
+  return headers.map((header) => String(header ?? "")).filter((h) => h.length > 0);
 }
 
 function toColumnOptions(headers: string[]): ColumnOption[] {
@@ -2180,6 +2183,7 @@ export function UniversalImportClient({
   }
 
   function handleEditRule(rule: RuleRecord) {
+    // 快速编辑：打开编辑弹框（名称 + 收货信息）
     const presets = (rule.ruleDsl as UniversalImportRuleDsl | null)?.presetReceivers ?? [];
     const firstPreset = presets[0];
     setEditingRuleId(rule.id);
@@ -2191,6 +2195,13 @@ export function UniversalImportClient({
       receiverAddress: firstPreset?.receiverAddress ?? "",
     });
     setEditRuleDialogOpen(true);
+  }
+
+  function handleEditRuleConfig(rule: RuleRecord) {
+    // 加载规则到完整编辑器并跳转到导入 tab
+    handleApplyRule(rule);
+    setActiveTab("import");
+    setRuleStatus(`已进入规则「${rule.ruleName}」编辑状态，可直接修改字段映射和规则配置后保存。`);
   }
 
   function closeEditRuleDialog() {
@@ -2211,11 +2222,18 @@ export function UniversalImportClient({
     closeEditRuleDialog();
 
     try {
+      // 先获取现有规则，避免覆盖已有的 ruleDsl 配置
+      const existingRes = await fetch(`/api/universal-import/templates/${editingRuleId}`);
+      const existingData = (await existingRes.json()) as { template?: RuleRecord; error?: string };
+      const existing = existingData.template;
+
       const payload: Record<string, unknown> = {
         ruleName: trimmed.ruleName || "导入规则",
       };
 
       if (trimmed.receiverStore || trimmed.receiverName) {
+        const existingDsl = (existing?.ruleDsl ?? {}) as Record<string, unknown>;
+        const existingPresets = (existingDsl.presetReceivers as Array<unknown>) ?? [];
         const preset: PresetReceiver = {
           id: crypto.randomUUID(),
           label: trimmed.receiverStore || trimmed.receiverName || "默认收货方",
@@ -2225,8 +2243,20 @@ export function UniversalImportClient({
           receiverAddress: trimmed.receiverAddress,
         };
         payload.ruleDsl = {
-          presetReceivers: [preset],
+          ...existingDsl,
+          presetReceivers: [...existingPresets, preset],
         };
+      } else if (existing) {
+        // 保持已有的 ruleDsl 不变
+        payload.ruleDsl = existing.ruleDsl;
+      }
+
+      // 保持已有字段
+      if (existing) {
+        payload.sheetName = (existing as Record<string, unknown>).sheetName ?? undefined;
+        payload.headers = (existing.sampleMeta as Record<string, unknown>)?.headers ?? [];
+        payload.mapping = existing.mapping;
+        payload.fileType = existing.fileType;
       }
 
       const response = await fetch(`/api/universal-import/templates/${editingRuleId}`, {
@@ -4167,6 +4197,7 @@ export function UniversalImportClient({
                         <p className="section-kicker">规则列表</p>
                         <h3>已保存的导入规则</h3>
                       </div>
+                      <button type="button" className="primary-button" onClick={openNewRuleDialog}>新建规则</button>
                       <button
                         type="button"
                         className="secondary-button"
@@ -4225,10 +4256,9 @@ export function UniversalImportClient({
                                 <td>
                                   <div className="toolbar table-action-toolbar">
                                     <button type="button" className="text-link-button" onClick={() => handleApplyRule(rule)}>应用</button>
+                                    <button type="button" className="text-link-button" onClick={() => handleEditRule(rule)}>编辑</button>
+                                    <button type="button" className="text-link-button" onClick={() => handleEditRuleConfig(rule)}>编辑配置</button>
                                     <button type="button" className="text-link-button" onClick={() => void handleCopyRule(rule)}>复制</button>
-                                    <button type="button" className="text-link-button" onClick={() => {
-                                      handleEditRule(rule);
-                                    }}>编辑</button>
                                     <button type="button" className="text-link-button" onClick={() => void handleDeleteRule(rule.id)}>删除</button>
                                   </div>
                                 </td>
