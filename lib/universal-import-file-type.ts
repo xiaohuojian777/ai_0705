@@ -15,6 +15,10 @@ export function detectImportFileTypeFromName(fileName: string): SupportedImportF
     return "pdf";
   }
 
+  if (normalizedName.endsWith(".txt") || normalizedName.endsWith(".csv") || normalizedName.endsWith(".tsv")) {
+    return "text";
+  }
+
   return null;
 }
 

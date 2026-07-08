@@ -695,12 +695,16 @@ function detectFileTypeFromName(fileName: string): SupportedImportFileType | nul
     return "excel";
   }
 
-  if (extension === ".docx") {
+  if (extension === ".docx" || extension === ".doc") {
     return "word";
   }
 
   if (extension === ".pdf") {
     return "pdf";
+  }
+
+  if (extension === ".txt" || extension === ".csv" || extension === ".tsv") {
+    return "text";
   }
 
   return null;
@@ -713,6 +717,10 @@ function formatFileTypeLabel(value: string) {
 
   if (value === "word") {
     return "Word";
+  }
+
+  if (value === "text") {
+    return "文本";
   }
 
   return "Excel";
@@ -2975,6 +2983,7 @@ export function UniversalImportClient({
                         <span>文件类型</span>
                         <select value={fileType} onChange={(event) => handleFileTypeChange(event.target.value as SupportedImportFileType)}>
                           <option value="excel">Excel</option>
+                          <option value="text">文本 (TXT/CSV)</option>
                           <option value="word">Word</option>
                           <option value="pdf">PDF</option>
                         </select>

@@ -51,7 +51,7 @@ function suppressImageErrors<T>(fn: () => T): T {
   }
 }
 
-export type SupportedImportFileType = "excel" | "word" | "pdf";
+export type SupportedImportFileType = "excel" | "word" | "pdf" | "text";
 
 export type ParsedDocument = {
   fileType: SupportedImportFileType;
@@ -703,14 +703,15 @@ function extractFieldsByRegex(text: string, fieldRegex: unknown) {
   const normalized = normalizeFieldRegexMap(fieldRegex);
 
   (Object.keys(normalized) as UniversalImportField[]).forEach((field) => {
-    const regex = createRegex(normalized[field], "im") ?? createRelaxedKeyValueRegex(normalized[field], "im");
+    const pattern = normalized[field];
+    const regex = createRegex(pattern, "im") ?? createRelaxedKeyValueRegex(pattern, "im");
     if (!regex) {
       return;
     }
 
     let match = text.match(regex);
     if (!match) {
-      match = text.match(createRelaxedKeyValueRegex(normalized[field], "im") ?? regex);
+      match = text.match(createRelaxedKeyValueRegex(pattern, "im") ?? regex);
     }
 
     if (!match) {
@@ -719,11 +720,12 @@ function extractFieldsByRegex(text: string, fieldRegex: unknown) {
 
     const extractedValue = cleanExtractedField(
       field,
-      match.groups?.[field]?.replace(/\s+/g, " ").trim() ?? extractTextField(text, normalized[field]),
+      match.groups?.[field]?.replace(/\s+/g, " ").trim() ?? extractTextField(text, pattern),
     );
-    if (shouldAcceptFieldValue(field, extractedValue)) {
-      output[field] = extractedValue;
+    if (!shouldAcceptFieldValue(field, extractedValue)) {
+      return;
     }
+    output[field] = extractedValue;
   });
 
   return output;
@@ -1012,11 +1014,37 @@ async function parsePdfDocument(fileBuffer: Buffer, originalFileName: string): P
   };
 }
 
+async function parseTextDocument(fileBuffer: Buffer, originalFileName: string): Promise<ParsedDocument> {
+  const text = fileBuffer.toString("utf-8");
+  const lines = splitLines(text);
+  const rows = lines.map((line) => [line]);
+
+  return {
+    fileType: "text",
+    sheetName: originalFileName || "Text Document",
+    headers: [],
+    headerRowIndex: 0,
+    rawRows: [],
+    textContent: text,
+    sections: [
+      {
+        title: originalFileName || "Text Document",
+        rows,
+        text,
+      },
+    ],
+  };
+}
+
 export async function parseImportDocument(options: {
   fileBuffer: Buffer;
   fileType: SupportedImportFileType;
   originalFileName: string;
 }) {
+  if (options.fileType === "text") {
+    return parseTextDocument(options.fileBuffer, options.originalFileName);
+  }
+
   if (options.fileType === "word") {
     return parseWordDocument(options.fileBuffer, options.originalFileName);
   }
@@ -1236,6 +1264,11 @@ function parseMatrixWithHeader(
       baseValues[field] = getColumnValue(sourceRow, rowColumns[field]);
     });
 
+    // Skip rows where the SKU code itself matches the exclude pattern (e.g. "合计", "总计")
+    if (excludeRegex?.test(normalizeCell(baseValues.skuCode))) {
+      return;
+    }
+
     for (let columnIndex = matrixStart; columnIndex <= matrixEnd; columnIndex += 1) {
       const receiverStore = normalizeCell(header[columnIndex]);
       const quantity = normalizeCell(sourceRow[columnIndex]);
@@ -1317,6 +1350,11 @@ function parseSplitMultilineCells(
         baseValues[field] = value;
       }
     });
+
+    // Skip rows where the SKU code matches the exclude pattern (e.g. "合计", "总计")
+    if (excludeRegex?.test(normalizeCell(baseValues.skuCode))) {
+      return;
+    }
 
     for (let columnIndex = matrixStart; columnIndex <= matrixEnd; columnIndex += 1) {
       const columnHeader = normalizeCell(header[columnIndex]);
@@ -1527,7 +1565,8 @@ function parseTextRecords(
       ...globalBaseValues,
       externalCode: globalBaseValues.externalCode || ensureUniqueExternalCode("TXT", index),
     };
-    Object.assign(baseValues, extractFieldsByRegex(chunk, config.fieldRegex));
+    const extracted = extractFieldsByRegex(chunk, config.fieldRegex);
+    Object.assign(baseValues, extracted);
     output.push(...parseTextItems(chunk, config.item, baseValues, rowOffset + output.length));
   });
 
