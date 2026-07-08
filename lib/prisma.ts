@@ -7,7 +7,9 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 function getDatasourceUrl(): string {
-  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  // SQLite 要求 URL 以 file: 开头，忽略 Vercel 上可能遗留的非 SQLite DATABASE_URL
+  const envUrl = process.env.DATABASE_URL;
+  if (envUrl && envUrl.startsWith("file:")) return envUrl;
 
   const tmpPath = "/tmp/dev.db";
 
