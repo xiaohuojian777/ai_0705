@@ -1213,6 +1213,7 @@ export function UniversalImportClient({
   const [ruleList, setRuleList] = useState<RuleRecord[]>([]);
   const [ruleLoading, setRuleLoading] = useState(false);
   const [ruleDeleting, setRuleDeleting] = useState(false);
+  const [savingRule, setSavingRule] = useState(false);
   const [ruleStatus, setRuleStatus] = useState("");
   const [ruleNameInput, setRuleNameInput] = useState("");
   const [selectedRuleId, setSelectedRuleId] = useState("");
@@ -2138,16 +2139,23 @@ export function UniversalImportClient({
   }
 
   async function handleConfirmAiSuggestionSave() {
-    if (!selectedFile || headers.length === 0) {
-      setRuleStatus("请先上传样例文件，并点击 AI 生成规则建议。");
+    if (headers.length === 0) {
+      setStatus("请先上传样例文件，并点击 AI 生成规则建议。");
       return;
     }
+    setSavingRule(true);
     try {
       const template = await saveRule("POST");
       setRuleStatus(`AI 建议已确认，并保存为规则"${template.ruleName}"。`);
       setStatus(`AI 建议已确认，并保存为规则"${template.ruleName}"。`);
+      pushToast("规则已保存", "success");
     } catch (error) {
-      setRuleStatus(error instanceof Error ? error.message : "确认 AI 建议失败，请稍后重试。");
+      const msg = error instanceof Error ? error.message : "确认 AI 建议失败，请稍后重试。";
+      setRuleStatus(msg);
+      setStatus(msg);
+      pushToast(msg, "error");
+    } finally {
+      setSavingRule(false);
     }
   }
 
@@ -2580,10 +2588,6 @@ export function UniversalImportClient({
 
   async function submitImport() {
     setSubmitBlockingIssues([]);
-    if (!selectedRuleId) {
-      setStatus("请先手动选择解析规则，再提交下单。");
-      return;
-    }
 
     if (draftRows.length === 0) {
       setStatus("请先导入并试解析文件。");
@@ -2876,7 +2880,9 @@ export function UniversalImportClient({
     };
   }, []);
 
-  const submitBlockedHint = !selectedRuleId
+  const submitBlockedHint = (draftRows.length > 0 && !selectedRuleId)
+    ? null
+    : !selectedRuleId && draftRows.length === 0
     ? "请先手动选择解析规则后再提交。"
     : hasBlockingErrors
       ? selectedIds.length > 0
@@ -3204,8 +3210,8 @@ export function UniversalImportClient({
                             <button type="button" className="secondary-button" onClick={() => void handleTestDraftRule()} disabled={!selectedFile}>
                               试解析当前 AI 建议
                             </button>
-                            <button type="button" className="primary-button" onClick={() => void handleConfirmAiSuggestionSave()} disabled={headers.length === 0}>
-                              确认 AI 建议并保存为规则
+                            <button type="button" className="primary-button" onClick={() => void handleConfirmAiSuggestionSave()} disabled={headers.length === 0 || savingRule}>
+                              {savingRule ? "正在保存..." : "确认 AI 建议并保存为规则"}
                             </button>
                           </div>
                         </div>
@@ -3583,7 +3589,7 @@ export function UniversalImportClient({
                     type="button"
                     className="primary-button"
                     onClick={() => void submitImport()}
-                    disabled={submitting || draftRows.length === 0 || hasBlockingErrors || !selectedRuleId}
+                    disabled={submitting || draftRows.length === 0 || hasBlockingErrors}
                     title={submitBlockedHint || (selectedIds.length > 0 ? `提交勾选的 ${selectedCount} 条数据下单` : "提交下单")}
                   >
                     {submitting ? "提交中..." : selectedIds.length > 0 ? `提交选中行下单 (${selectedCount}/${totalCount})` : "提交下单"}
@@ -3985,8 +3991,8 @@ export function UniversalImportClient({
                     <div className="toolbar rule-editor-toolbar rule-editor-toolbar-sticky" style={{ marginTop: 16 }}>
                       <button type="button" className="tool-button quiet" onClick={openNewRuleDialog}>新建规则</button>
                       <button type="button" className="secondary-button" onClick={() => void handleTestCurrentRule()} disabled={!selectedFile}>试解析当前规则</button>
-                      <button type="button" className="secondary-button accent" onClick={() => void handleConfirmAiSuggestionSave()} disabled={headers.length === 0}>
-                        采用 AI 建议并保存规则
+                      <button type="button" className="secondary-button accent" onClick={() => void handleConfirmAiSuggestionSave()} disabled={headers.length === 0 || savingRule}>
+                        {savingRule ? "正在保存..." : "采用 AI 建议并保存规则"}
                       </button>
                       <button type="button" className="primary-button" onClick={() => void handleUpdateSelectedRule()} disabled={!selectedRuleId}>保存当前编辑规则</button>
                     </div>
