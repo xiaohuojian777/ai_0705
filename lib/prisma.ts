@@ -1,53 +1,44 @@
 import { PrismaClient } from "@prisma/client";
 import fs from "fs";
-import path from "path";
+import { DB_BASE64 } from "./db-base64";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-/**
- * 在 Vercel serverless 环境中，文件系统只读（除 /tmp）。
- * 我们探测多个可能路径找到 dev.db，复制到 /tmp 后使用。
- */
-function findAndPrepareDb(): string {
+function getDatasourceUrl(): string {
+  // 环境变量优先
   if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
 
   const tmpPath = "/tmp/dev.db";
+
+  // 热启动：/tmp 已有数据库
   if (fs.existsSync(tmpPath)) return `file:${tmpPath}`;
 
-  // 按优先级探测源路径（覆盖 Vercel serverless 各种目录结构）
-  const candidates = [
-    path.join(process.cwd(), "prisma", "dev.db"),
-    path.resolve(process.cwd(), "prisma", "dev.db"),
-    "/var/task/prisma/dev.db",
-    path.join(__dirname || "", "..", "prisma", "dev.db"),
-  ];
-
-  for (const src of candidates) {
-    try {
-      if (fs.existsSync(src)) {
-        fs.copyFileSync(src, tmpPath);
-        console.log(`[prisma] db copied: ${src} → ${tmpPath}`);
-        return `file:${tmpPath}`;
-      }
-    } catch (e) {
-      console.log(`[prisma] copy failed for ${src}:`, (e as Error).message);
-    }
+  // 冷启动：从内嵌 base64 还原数据库到 /tmp
+  if (DB_BASE64) {
+    fs.writeFileSync(tmpPath, Buffer.from(DB_BASE64, "base64"));
+    console.log(`[prisma] restored db from embedded base64 → ${tmpPath}`);
+    return `file:${tmpPath}`;
   }
 
-  // 最终回退 — 本地开发场景
-  const fallback = "file:./prisma/dev.db";
-  console.log(`[prisma] using fallback: ${fallback}`);
-  return fallback;
+  // 本地开发回退
+  return "file:./prisma/dev.db";
 }
 
-function createPrismaClient() {
-  const url = findAndPrepareDb();
-  return new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
-    datasourceUrl: url,
-  });
+function createPrismaClient(): PrismaClient {
+  try {
+    return new PrismaClient({
+      log:
+        process.env.NODE_ENV === "development"
+          ? ["warn", "error"]
+          : ["error"],
+      datasourceUrl: getDatasourceUrl(),
+    });
+  } catch (err) {
+    console.error("[prisma] PrismaClient construction failed:", err);
+    throw err;
+  }
 }
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();

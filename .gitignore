@@ -14,3 +14,6 @@ dist
 .env*.local
 .next-*.log
 .codex/
+
+# base64 嵌入数据库（构建时自动生成，不提交）
+lib/db-base64.ts
