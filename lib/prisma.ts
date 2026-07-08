@@ -1,9 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import fs from "fs";
-// Next.js 原生 JSON import：构建时将 .json 内容直接内联到 bundle
-import dbData from "./db-base64.json";
-
-const DB_BASE64: string | undefined = (dbData as { base64?: string }).base64;
+import { DB_BASE64 } from "./db-base64";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
