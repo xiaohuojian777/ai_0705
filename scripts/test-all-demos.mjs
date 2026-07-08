@@ -78,13 +78,22 @@ function getFileType(filename) {
   return "text";
 }
 
-async function findExistingRule(fingerprint) {
+async function findExistingRule(fingerprint, ruleName, fileType) {
   const res = await fetch(`${BASE_URL}/api/universal-import/templates`);
   if (!res.ok) return null;
   const { templates } = await res.json();
-  return (templates || []).find(
+  // 优先 fingerprint 前缀匹配
+  let found = (templates || []).find(
     (t) => t.fingerprint?.startsWith(fingerprint) && t.status !== "DELETED"
-  ) || null;
+  );
+  if (found) return found;
+  // TXT 文件 fingerprint 可能不匹配（保存 API 用 "sheet1::"，测试 API 用文件名），兜底按 ruleName + fileType 匹配
+  if (ruleName && fileType) {
+    found = (templates || []).find(
+      (t) => t.ruleName === ruleName && t.fileType === fileType && t.status !== "DELETED"
+    );
+  }
+  return found || null;
 }
 
 async function testFile(filename, stats) {
@@ -179,7 +188,7 @@ async function testFile(filename, stats) {
   const stepNum3 = isTxt ? "3/3" : "3/4";
   console.log(`  [${stepNum3}] 保存规则（去重检查）...`);
   const effectiveFingerprint = fingerprint || `${ruleName}::`;
-  const existingRule = await findExistingRule(effectiveFingerprint);
+  const existingRule = await findExistingRule(effectiveFingerprint, ruleName, fileType);
   let savedRuleId = null;
   if (existingRule) {
     console.log(`  ⏭ 已存在: "${existingRule.ruleName}" v${existingRule.version} (id: ${existingRule.id})`);
