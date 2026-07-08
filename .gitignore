@@ -15,5 +15,6 @@ dist
 .next-*.log
 .codex/
 
-# 构建时复制数据库文件（构建时自动生成，不提交）
+# 构建时生成数据库文件（构建时自动生成，不提交）
+lib/db-base64.json
 lib/dev.db

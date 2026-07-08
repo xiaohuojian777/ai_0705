@@ -1,13 +1,15 @@
 import { PrismaClient } from "@prisma/client";
 import fs from "fs";
-import path from "path";
+// Next.js 原生 JSON import：构建时将 .json 内容直接内联到 bundle
+import dbData from "./db-base64.json";
+
+const DB_BASE64: string | undefined = (dbData as { base64?: string }).base64;
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
 function getDatasourceUrl(): string {
-  // 环境变量优先
   if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
 
   const tmpPath = "/tmp/dev.db";
@@ -15,27 +17,14 @@ function getDatasourceUrl(): string {
   // 热启动：/tmp 已有数据库
   if (fs.existsSync(tmpPath)) return `file:${tmpPath}`;
 
-  // 冷启动：尝试多种路径找到数据库文件并复制到 /tmp
-  const candidates = [
-    // outputFileTracingIncludes 打包后的位置
-    path.join(process.cwd(), "lib", "dev.db"),
-    // 直接在根目录
-    path.join(process.cwd(), "prisma", "dev.db"),
-    // .next 构建目录内
-    path.join(process.cwd(), ".next", "server", "lib", "dev.db"),
-    // 本地开发路径
-    path.join(process.cwd(), "..", "prisma", "dev.db"),
-  ];
-
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      fs.copyFileSync(p, tmpPath);
-      console.log(`[prisma] copied db from ${p} → ${tmpPath}`);
-      return `file:${tmpPath}`;
-    }
+  // 冷启动：从 JSON 内嵌的 base64 还原数据库到 /tmp
+  if (DB_BASE64) {
+    fs.writeFileSync(tmpPath, Buffer.from(DB_BASE64, "base64"));
+    console.log(`[prisma] restored db from embedded JSON → ${tmpPath}`);
+    return `file:${tmpPath}`;
   }
 
-  // 最终回退：本地开发
+  // 回退：本地开发
   return "file:./prisma/dev.db";
 }
 
