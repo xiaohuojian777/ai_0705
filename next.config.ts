@@ -2,7 +2,11 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
-    "/**/*": ["./prisma/**/*"],
+    "/**/*": [
+      "./prisma/**/*",
+      "./node_modules/.prisma/**/*",
+      "./node_modules/@prisma/client/**/*",
+    ],
   },
 };
 

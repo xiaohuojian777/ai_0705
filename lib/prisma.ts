@@ -6,32 +6,47 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-function getDatasourceUrl(): string {
+/**
+ * 在 Vercel serverless 环境中，文件系统只读（除 /tmp）。
+ * 我们探测多个可能路径找到 dev.db，复制到 /tmp 后使用。
+ */
+function findAndPrepareDb(): string {
   if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
 
   const tmpPath = "/tmp/dev.db";
-  // 检查 /tmp 是否已有复制过的 db（Vercel 函数热启动）
   if (fs.existsSync(tmpPath)) return `file:${tmpPath}`;
 
-  // 从只读源路径复制到 /tmp 可写目录（Vercel serverless）
-  const src = path.join(process.cwd(), "prisma", "dev.db");
-  try {
-    if (fs.existsSync(src)) {
-      fs.copyFileSync(src, tmpPath);
-      return `file:${tmpPath}`;
+  // 按优先级探测源路径（覆盖 Vercel serverless 各种目录结构）
+  const candidates = [
+    path.join(process.cwd(), "prisma", "dev.db"),
+    path.resolve(process.cwd(), "prisma", "dev.db"),
+    "/var/task/prisma/dev.db",
+    path.join(__dirname || "", "..", "prisma", "dev.db"),
+  ];
+
+  for (const src of candidates) {
+    try {
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, tmpPath);
+        console.log(`[prisma] db copied: ${src} → ${tmpPath}`);
+        return `file:${tmpPath}`;
+      }
+    } catch (e) {
+      console.log(`[prisma] copy failed for ${src}:`, (e as Error).message);
     }
-  } catch {
-    // Vercel 上复制失败，尝试直接用（可能只读，会触发锁文件错误）
   }
 
-  // 本地开发回退
-  return "file:./prisma/dev.db";
+  // 最终回退 — 本地开发场景
+  const fallback = "file:./prisma/dev.db";
+  console.log(`[prisma] using fallback: ${fallback}`);
+  return fallback;
 }
 
 function createPrismaClient() {
+  const url = findAndPrepareDb();
   return new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
-    datasourceUrl: getDatasourceUrl(),
+    datasourceUrl: url,
   });
 }
 
