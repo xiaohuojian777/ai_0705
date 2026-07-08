@@ -1,0 +1,31 @@
+{
+  "batchName": "多门店分Sheet出库单_V2.xlsx",
+  "originalFileName": "多门店分Sheet出库单_V2.xlsx",
+  "fileType": "excel",
+  "sheetName": "朝阳门店",
+  "headers": ["朝阳门店出库单","","","","","","","","","",""],
+  "mapping": {
+    "externalCode": null,
+    "receiverStore": null,
+    "receiverName": null,
+    "receiverPhone": null,
+    "receiverAddress": null,
+    "skuCode": null,
+    "skuName": null,
+    "skuQuantity": null,
+    "skuSpec": null,
+    "note": null
+  },
+  "fingerprint": "朝阳门店::外部编码|sku物品编码|sku物品名称|sku规格型号|sku发货数量|收货门店|收货人姓名|收货人电话|收货人地址|备注|",
+  "ruleId": "",
+  "rows": [
+    {"externalCode":"CY20250708001","receiverStore":"朝阳门店","receiverName":"张三","receiverPhone":"13800138001","receiverAddress":"北京市朝阳区XX路1号","skuCode":"SKU001","skuName":"农夫山泉矿泉水","skuQuantity":"10","skuSpec":"550ml*24","note":"","rowIndex":1,"id":"a1b2c3d4-e5f6-7890-abcd-ef1234567890"},
+    {"externalCode":"CY20250708001","receiverStore":"朝阳门店","receiverName":"张三","receiverPhone":"13800138001","receiverAddress":"北京市朝阳区XX路1号","skuCode":"SKU002","skuName":"康师傅方便面","skuQuantity":"5","skuSpec":"红烧牛肉面5连包","note":"","rowIndex":2,"id":"b2c3d4e5-f6a7-8901-bcde-f12345678901"},
+    {"externalCode":"HD20250708001","receiverStore":"海淀门店","receiverName":"李四","receiverPhone":"13900139002","receiverAddress":"北京市海淀区XX路2号","skuCode":"SKU003","skuName":"可口可乐","skuQuantity":"8","skuSpec":"330ml*24罐","note":"","rowIndex":3,"id":"c3d4e5f6-a7b8-9012-cdef-123456789012"},
+    {"externalCode":"HD20250708001","receiverStore":"海淀门店","receiverName":"李四","receiverPhone":"13900139002","receiverAddress":"北京市海淀区XX路2号","skuCode":"SKU004","skuName":"金龙鱼调和油","skuQuantity":"3","skuSpec":"5L","note":"","rowIndex":4,"id":"d4e5f6a7-b8c9-0123-defa-234567890123"},
+    {"externalCode":"HD20250708001","receiverStore":"海淀门店","receiverName":"李四","receiverPhone":"13900139002","receiverAddress":"北京市海淀区XX路2号","skuCode":"SKU005","skuName":"蒙牛纯牛奶","skuQuantity":"6","skuSpec":"250ml*24盒","note":"","rowIndex":5,"id":"e5f6a7b8-c9d0-1234-efab-345678901234"},
+    {"externalCode":"XC20250708001","receiverStore":"西城门门店","receiverName":"王五","receiverPhone":"13700137003","receiverAddress":"北京市西城区XX路3号","skuCode":"SKU006","skuName":"维达纸巾","skuQuantity":"12","skuSpec":"3层*10包","note":"","rowIndex":6,"id":"f6a7b8c9-d0e1-2345-fabc-456789012345"},
+    {"externalCode":"XC20250708001","receiverStore":"西城门门店","receiverName":"王五","receiverPhone":"13700137003","receiverAddress":"北京市西城区XX路3号","skuCode":"SKU007","skuName":"乐事薯片","skuQuantity":"20","skuSpec":"原味104g","note":"","rowIndex":7,"id":"a7b8c9d0-e1f2-3456-abcd-567890123456"},
+    {"externalCode":"XC20250708001","receiverStore":"西城门门店","receiverName":"王五","receiverPhone":"13700137003","receiverAddress":"北京市西城区XX路3号","skuCode":"SKU001","skuName":"农夫山泉矿泉水","skuQuantity":"15","skuSpec":"550ml*24","note":"","rowIndex":8,"id":"b8c9d0e1-f2a3-4567-bcde-678901234567"}
+  ]
+}
